@@ -1,2 +1,2 @@
-# lexis
+# lexicle
 Parser Combinator Framework for Rust
