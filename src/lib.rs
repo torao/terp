@@ -13,6 +13,8 @@ pub enum Error {
   CharacterDecoding { encoding: &'static str, position: u64, sequence: Vec<u8> },
   #[error("the marked position {0} is incorrect")]
   OperationByIncorrectStreamMark(u64),
+  #[error("invalid seek to a negative or overflowing position")]
+  InvalidSeek(i64),
 
   #[error(transparent)]
   Io(#[from] std::io::Error),

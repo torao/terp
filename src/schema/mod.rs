@@ -1,6 +1,8 @@
+use crate::parser;
 use crate::{Error, Result};
 use async_recursion::async_recursion;
 use async_trait::async_trait;
+use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::marker::Send;
@@ -8,43 +10,18 @@ use std::ops::{BitAnd, BitOr, Mul, RangeInclusive};
 
 pub mod text;
 
-pub struct Schema {}
+#[cfg(test)]
+mod test;
 
-pub trait Item: Copy + PartialOrd + Debug + Send + Sync {}
-
-impl Item for char {}
-
-impl Item for u8 {}
-
-#[async_trait]
-pub trait Parser<E, INPUT>: Display + Send + Sync
-where
-  E: Item,
-  INPUT: InputSource<E>,
-{
-  async fn parse(&self, context: &mut Context<E, INPUT>) -> Result<bool>;
+pub struct Schema<E: Item, INPUT: InputSource<E>> {
+  syntax: HashMap<String, Syntax<E, INPUT>>,
 }
 
-pub struct Context<E, INPUT>
-where
-  E: Item,
-  INPUT: InputSource<E>,
-{
-  pub is: INPUT,
-  _e: PhantomData<E>,
+impl<E: Item, INPUT: InputSource<E>> Schema<E, INPUT> {
+  pub fn new_parser_context(&self) -> parser::Context {
+    todo!()
+  }
 }
-
-pub type Position = u64;
-
-#[async_trait]
-pub trait InputSource<E: Item>: Send + Sync {
-  async fn read(&mut self) -> Result<Option<E>>;
-  async fn unread(&mut self, length: usize) -> Result<()>;
-  async fn position(&mut self) -> Result<Position>;
-  async fn seek(&mut self, position: Position) -> Result<()>;
-}
-
-// ---------------------------------
 
 // macro_rules! schema {
 //   ($name:ident : $($meta_identifier:ident := $($definition_list:expr)* , )+ ) => {
@@ -67,6 +44,127 @@ pub trait InputSource<E: Item>: Send + Sync {
 //     Two := { usize::from_le_bytes([1, 0, 0, 0, 0, 0, 0, 0]) + 1 },
 //     Three := todo!(),
 // }
+
+pub trait Item: Copy + PartialOrd + Debug + Send + Sync {
+  fn to_single_debug(value: Self) -> String;
+  fn to_sampling_debug(values: Vec<Self>, eof: bool) -> String;
+}
+
+impl Item for char {
+  fn to_single_debug(value: Self) -> String {
+    format!("{:?}", value)
+  }
+  fn to_sampling_debug(values: Vec<Self>, eof: bool) -> String {
+    let mut s = values.iter().map(|c| c.escape_debug().to_string()).collect::<String>();
+    if eof {
+      s += "[EOF]";
+    } else {
+      s += "...";
+    }
+    s
+  }
+}
+
+impl Item for u8 {
+  fn to_single_debug(value: Self) -> String {
+    format!("{:02X}", value)
+  }
+  fn to_sampling_debug(values: Vec<Self>, eof: bool) -> String {
+    let mut s = values.iter().map(|c| format!("{:02X}", c)).collect::<String>();
+    if eof {
+      s += "[EOF]";
+    } else {
+      s += "...";
+    }
+    s
+  }
+}
+
+// ---------------------------------
+
+pub enum MatchResult {
+  Match,
+  MatchAndCanAcceptMore,
+  Unmatch,
+  UnmatchAndCanAcceptMore,
+}
+
+pub trait Matcher<E: Item>: Display + Send + Sync {
+  fn matches(&self, values: &[E]) -> Result<MatchResult>;
+}
+
+// ---------------------------------
+
+pub type Position = u64;
+
+#[async_trait]
+pub trait InputSource<E: Item>: Send + Sync {
+  async fn read(&mut self) -> Result<Option<E>>;
+  async fn unread(&mut self, length: usize) -> Result<()>;
+  async fn position(&mut self) -> Result<Position>;
+  async fn seek(&mut self, position: Position) -> Result<()>;
+
+  async fn sampling(&mut self, range: std::ops::Range<isize>) -> Result<(Vec<E>, bool)> {
+    let position = self.position().await?;
+    if range.start != 0 {
+      let start = if range.start < 0 { position - range.start.abs() as u64 } else { position + range.start as u64 };
+      self.seek(start).await?;
+    }
+    let mut buffer = Vec::with_capacity((range.end - range.start) as usize + 1);
+    let mut eof_detected = false;
+    for _ in range {
+      if let Some(value) = self.read().await? {
+        buffer.push(value);
+      } else {
+        eof_detected = true;
+        break;
+      }
+    }
+    if !eof_detected && self.read().await?.is_none() {
+      eof_detected = true;
+    }
+    self.seek(position).await?;
+
+    Ok((buffer, eof_detected))
+  }
+}
+
+pub struct BufInputSource<E: Item> {
+  buffer: Vec<E>,
+  position: usize,
+}
+
+#[async_trait]
+impl<E: Item> InputSource<E> for BufInputSource<E> {
+  async fn read(&mut self) -> Result<Option<E>> {
+    if self.position == self.buffer.len() {
+      Ok(None)
+    } else {
+      self.position += 1;
+      Ok(Some(self.buffer[self.position - 1]))
+    }
+  }
+
+  async fn unread(&mut self, length: usize) -> Result<()> {
+    let new_position = self.position as i64 - length as i64;
+    if new_position >= 0 {
+      self.position = new_position as usize;
+      Ok(())
+    } else {
+      Err(Error::InvalidSeek(new_position))
+    }
+  }
+
+  async fn position(&mut self) -> Result<Position> {
+    todo!()
+  }
+
+  async fn seek(&mut self, position: Position) -> Result<()> {
+    todo!()
+  }
+}
+
+// ---------------------------------
 
 #[derive(Clone)]
 pub struct Range<E: Item>(std::ops::RangeInclusive<E>);
@@ -106,6 +204,8 @@ impl<E: Item> Display for Range<E> {
   }
 }
 
+// ---------------------------------
+
 pub struct Syntax<E, INPUT>
 where
   E: Item,
@@ -134,7 +234,10 @@ where
         Ok(())
       }
     } else {
-      Err()
+      let expected = self.to_string();
+      let (values, eof) = context.is.sampling(0..5).await?;
+      let actual = E::to_sampling_debug(values, eof);
+      Err(Error::Unexpected(expected, actual))
     }
   }
 
