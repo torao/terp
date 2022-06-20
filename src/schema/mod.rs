@@ -1,10 +1,6 @@
-use crate::parser;
-use crate::{Error, Result};
-use async_recursion::async_recursion;
-use async_trait::async_trait;
+use crate::Result;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
-use std::marker::PhantomData;
 use std::marker::Send;
 use std::ops::{BitAnd, BitOr, Mul, RangeInclusive};
 
@@ -13,13 +9,51 @@ pub mod text;
 #[cfg(test)]
 mod test;
 
-pub struct Schema<E: Item, INPUT: InputSource<E>> {
-  syntax: HashMap<String, Syntax<E, INPUT>>,
+#[derive(Debug)]
+pub struct Schema<E: Item> {
+  syntax: HashMap<String, Syntax<E>>,
 }
 
-impl<E: Item, INPUT: InputSource<E>> Schema<E, INPUT> {
-  pub fn new_parser_context(&self) -> parser::Context {
-    todo!()
+impl<E: Item> Schema<E> {
+  pub fn new() -> Self {
+    Schema { syntax: HashMap::new() }
+  }
+
+  #[must_use]
+  pub fn define(mut self, name: &str, syntax: Syntax<E>) -> Self {
+    let syntax = if let Primary::Seq(_) = &syntax.primary {
+      syntax
+    } else {
+      Syntax { repetition: 1..=1, primary: Primary::Seq(vec![syntax]) }
+    };
+    self.syntax.insert(name.to_string(), syntax);
+    self
+  }
+
+  pub fn names(&self) -> impl Iterator<Item = &str> {
+    self.syntax.keys().map(|k| k.as_str())
+  }
+
+  pub fn get(&self, name: &str) -> Option<&Syntax<E>> {
+    self.syntax.get(name)
+  }
+}
+
+impl<E: Item> Display for Schema<E> {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    let mut names = self.syntax.keys().collect::<Vec<_>>();
+    names.sort();
+    for name in names {
+      let syntax = self.syntax.get(name).unwrap();
+      writeln!(f, "{} := {}", name, syntax)?;
+    }
+    Ok(())
+  }
+}
+
+impl<E: Item> Default for Schema<E> {
+  fn default() -> Self {
+    Self::new()
   }
 }
 
@@ -46,42 +80,82 @@ impl<E: Item, INPUT: InputSource<E>> Schema<E, INPUT> {
 // }
 
 pub trait Item: Copy + PartialOrd + Debug + Send + Sync {
-  fn to_single_debug(value: Self) -> String;
-  fn to_sampling_debug(values: Vec<Self>, eof: bool) -> String;
+  type Location: Location<Self>;
+
+  fn debug_symbol(value: Self) -> String {
+    let values = [value];
+    Self::debug_symbols(&values)
+  }
+  fn debug_symbols(values: &[Self]) -> String;
+  fn debug_symbols_with_ellipsis(values: &[Self], ellipsis: bool) -> String {
+    Self::debug_symbols(values) + if ellipsis { "..." } else { "[EOF]" }
+  }
 }
 
 impl Item for char {
-  fn to_single_debug(value: Self) -> String {
+  type Location = CharLocation;
+
+  fn debug_symbol(value: Self) -> String {
     format!("{:?}", value)
   }
-  fn to_sampling_debug(values: Vec<Self>, eof: bool) -> String {
-    let mut s = values.iter().map(|c| c.escape_debug().to_string()).collect::<String>();
-    if eof {
-      s += "[EOF]";
-    } else {
-      s += "...";
-    }
-    s
+  fn debug_symbols(values: &[Self]) -> String {
+    values.iter().map(|c| c.escape_debug().to_string()).collect::<String>()
   }
 }
 
 impl Item for u8 {
-  fn to_single_debug(value: Self) -> String {
-    format!("{:02X}", value)
+  type Location = ByteLocation;
+
+  fn debug_symbols(values: &[Self]) -> String {
+    values.iter().map(|c| format!("{:02X}", c)).collect::<String>()
   }
-  fn to_sampling_debug(values: Vec<Self>, eof: bool) -> String {
-    let mut s = values.iter().map(|c| format!("{:02X}", c)).collect::<String>();
-    if eof {
-      s += "[EOF]";
+}
+
+pub trait Location<E: Item>: Default + Display + Copy + Clone {
+  fn next_with(&mut self, item: E);
+}
+
+#[derive(Default, Copy, Clone)]
+pub struct CharLocation {
+  lines: u64,
+  columns: u64,
+}
+
+impl Location<char> for CharLocation {
+  fn next_with(&mut self, ch: char) {
+    if ch == '\n' {
+      self.lines += 1;
+      self.columns = 1;
     } else {
-      s += "...";
+      self.columns += 1;
     }
-    s
+  }
+}
+
+impl Display for CharLocation {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "({},{})", self.lines, self.columns)
+  }
+}
+
+#[derive(Default, Copy, Clone)]
+pub struct ByteLocation(u64);
+
+impl Location<u8> for ByteLocation {
+  fn next_with(&mut self, _b: u8) {
+    self.0 += 1;
+  }
+}
+
+impl Display for ByteLocation {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "@{}", self.0)
   }
 }
 
 // ---------------------------------
 
+#[derive(Clone, Copy)]
 pub enum MatchResult {
   Match,
   MatchAndCanAcceptMore,
@@ -89,84 +163,19 @@ pub enum MatchResult {
   UnmatchAndCanAcceptMore,
 }
 
-pub trait Matcher<E: Item>: Display + Send + Sync {
+impl MatchResult {
+  pub fn is_match(&self) -> bool {
+    matches!(self, MatchResult::Match | MatchResult::MatchAndCanAcceptMore)
+  }
+}
+
+pub trait Matcher<E: Item>: Display + Debug + Send + Sync {
   fn matches(&self, values: &[E]) -> Result<MatchResult>;
 }
 
 // ---------------------------------
 
-pub type Position = u64;
-
-#[async_trait]
-pub trait InputSource<E: Item>: Send + Sync {
-  async fn read(&mut self) -> Result<Option<E>>;
-  async fn unread(&mut self, length: usize) -> Result<()>;
-  async fn position(&mut self) -> Result<Position>;
-  async fn seek(&mut self, position: Position) -> Result<()>;
-
-  async fn sampling(&mut self, range: std::ops::Range<isize>) -> Result<(Vec<E>, bool)> {
-    let position = self.position().await?;
-    if range.start != 0 {
-      let start = if range.start < 0 { position - range.start.abs() as u64 } else { position + range.start as u64 };
-      self.seek(start).await?;
-    }
-    let mut buffer = Vec::with_capacity((range.end - range.start) as usize + 1);
-    let mut eof_detected = false;
-    for _ in range {
-      if let Some(value) = self.read().await? {
-        buffer.push(value);
-      } else {
-        eof_detected = true;
-        break;
-      }
-    }
-    if !eof_detected && self.read().await?.is_none() {
-      eof_detected = true;
-    }
-    self.seek(position).await?;
-
-    Ok((buffer, eof_detected))
-  }
-}
-
-pub struct BufInputSource<E: Item> {
-  buffer: Vec<E>,
-  position: usize,
-}
-
-#[async_trait]
-impl<E: Item> InputSource<E> for BufInputSource<E> {
-  async fn read(&mut self) -> Result<Option<E>> {
-    if self.position == self.buffer.len() {
-      Ok(None)
-    } else {
-      self.position += 1;
-      Ok(Some(self.buffer[self.position - 1]))
-    }
-  }
-
-  async fn unread(&mut self, length: usize) -> Result<()> {
-    let new_position = self.position as i64 - length as i64;
-    if new_position >= 0 {
-      self.position = new_position as usize;
-      Ok(())
-    } else {
-      Err(Error::InvalidSeek(new_position))
-    }
-  }
-
-  async fn position(&mut self) -> Result<Position> {
-    todo!()
-  }
-
-  async fn seek(&mut self, position: Position) -> Result<()> {
-    todo!()
-  }
-}
-
-// ---------------------------------
-
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Range<E: Item>(std::ops::RangeInclusive<E>);
 
 impl<E: Item> Range<E> {
@@ -181,20 +190,10 @@ impl<E: Item> Range<E> {
   }
 }
 
-#[async_trait]
-impl<E, INPUT> Parser<E, INPUT> for Range<E>
-where
-  E: Item,
-  INPUT: InputSource<E>,
-{
-  async fn parse(&self, c: &mut Context<E, INPUT>) -> Result<bool> {
-    if let Some(ch) = c.is.read().await? {
-      if self.0.contains(&ch) {
-        return Ok(true);
-      }
-    }
-    c.is.unread(1).await?;
-    Ok(false)
+impl<E: Item> Matcher<E> for Range<E> {
+  fn matches(&self, values: &[E]) -> Result<MatchResult> {
+    assert!(values.len() == 1);
+    Ok(if self.0.contains(&values[0]) { MatchResult::Match } else { MatchResult::Unmatch })
   }
 }
 
@@ -206,131 +205,67 @@ impl<E: Item> Display for Range<E> {
 
 // ---------------------------------
 
-pub struct Syntax<E, INPUT>
-where
-  E: Item,
-  INPUT: InputSource<E>,
-{
-  arm: SyntaxArm<E, INPUT>,
-  range: RangeInclusive<usize>,
+#[derive(Debug)]
+pub struct Syntax<E: Item> {
+  pub(crate) repetition: RangeInclusive<usize>,
+  pub(crate) primary: Primary<E>,
 }
 
-impl<E, INPUT> Syntax<E, INPUT>
-where
-  E: Item,
-  INPUT: InputSource<E>,
-{
-  pub fn new(parser: Box<dyn Parser<E, INPUT>>) -> Self {
-    Self { arm: SyntaxArm::Term(parser), range: 1..=1 }
+impl<E: Item> Syntax<E> {
+  pub fn new(matcher: Box<dyn Matcher<E>>) -> Self {
+    Self { primary: Primary::Term(matcher), repetition: 1..=1 }
   }
 
-  pub async fn parse(&self, is: INPUT) -> Result<()> {
-    let mut context = Context { is, _e: PhantomData::default() };
-    if self.parse_with(&mut context).await? {
-      if let Some(ch) = context.is.read().await? {
-        context.is.unread(1).await?;
-        Err(Error::Unexpected(String::from("EOF"), format!("{:?}", ch)))
-      } else {
-        Ok(())
-      }
-    } else {
-      let expected = self.to_string();
-      let (values, eof) = context.is.sampling(0..5).await?;
-      let actual = E::to_sampling_debug(values, eof);
-      Err(Error::Unexpected(expected, actual))
-    }
-  }
-
-  #[async_recursion]
-  async fn parse_with(&self, context: &mut Context<E, INPUT>) -> Result<bool> {
-    match &self.arm {
-      SyntaxArm::Term(parser) => parser.parse(context).await,
-      SyntaxArm::Seq(terms) => {
-        for term in terms.iter() {
-          if !term.parse_with(context).await? {
-            return Ok(false);
-          }
-        }
-        Ok(true)
-      }
-      SyntaxArm::Or(terms) => {
-        let position = context.is.position().await?;
-        let mut longest = position;
-        for i in 0..terms.len() {
-          if i != 0 {
-            context.is.seek(position).await?;
-          }
-          if terms[i].parse_with(context).await? {
-            let new_position = context.is.position().await?;
-            assert!(new_position > position);
-            if new_position > longest {
-              if i + 1 == terms.len() {
-                return Ok(true);
-              }
-              longest = new_position;
-            }
-          }
-        }
-        Ok(if longest > position {
-          context.is.seek(longest).await?;
-          true
-        } else {
-          false
-        })
-      }
-    }
-  }
-
-  pub fn and(self, rhs: Syntax<E, INPUT>) -> Self {
-    let Syntax { arm: l_arm, range: l_range } = self;
-    let Syntax { arm: r_arm, range: r_range } = rhs;
+  pub fn and(self, rhs: Syntax<E>) -> Self {
+    let Syntax { primary: l_arm, repetition: l_range } = self;
+    let Syntax { primary: r_arm, repetition: r_range } = rhs;
     match (l_arm, r_arm) {
-      (SyntaxArm::Seq(mut lhs), SyntaxArm::Seq(mut rhs)) if l_range == r_range => {
+      (Primary::Seq(mut lhs), Primary::Seq(mut rhs)) if l_range == r_range => {
         lhs.append(&mut rhs);
-        let arm = SyntaxArm::Seq(lhs);
-        Syntax { arm, range: l_range }
+        let arm = Primary::Seq(lhs);
+        Syntax { primary: arm, repetition: l_range }
       }
-      (SyntaxArm::Seq(mut lhs), rhs) if l_range == r_range => {
-        lhs.push(Syntax { arm: rhs, range: r_range });
-        let arm = SyntaxArm::Seq(lhs);
-        Syntax { arm, range: l_range }
+      (Primary::Seq(mut lhs), rhs) if l_range == r_range => {
+        lhs.push(Syntax { primary: rhs, repetition: r_range });
+        let arm = Primary::Seq(lhs);
+        Syntax { primary: arm, repetition: l_range }
       }
-      (lhs, SyntaxArm::Seq(mut rhs)) if l_range == r_range => {
-        rhs.insert(0, Syntax { arm: lhs, range: r_range });
-        let arm = SyntaxArm::Seq(rhs);
-        Syntax { arm, range: l_range }
+      (lhs, Primary::Seq(mut rhs)) if l_range == r_range => {
+        rhs.insert(0, Syntax { primary: lhs, repetition: r_range });
+        let arm = Primary::Seq(rhs);
+        Syntax { primary: arm, repetition: l_range }
       }
       (lhs, rhs) => {
-        let lhs = Syntax { arm: lhs, range: l_range };
-        let rhs = Syntax { arm: rhs, range: r_range };
-        Syntax { arm: SyntaxArm::Seq(vec![lhs, rhs]), range: 1..=1 }
+        let lhs = Syntax { primary: lhs, repetition: l_range };
+        let rhs = Syntax { primary: rhs, repetition: r_range };
+        Syntax { primary: Primary::Seq(vec![lhs, rhs]), repetition: 1..=1 }
       }
     }
   }
 
-  pub fn or(self, rhs: Syntax<E, INPUT>) -> Self {
-    let Syntax { arm: l_arm, range: l_range } = self;
-    let Syntax { arm: r_arm, range: r_range } = rhs;
+  pub fn or(self, rhs: Syntax<E>) -> Self {
+    let Syntax { primary: l_arm, repetition: l_range } = self;
+    let Syntax { primary: r_arm, repetition: r_range } = rhs;
     match (l_arm, r_arm) {
-      (SyntaxArm::Or(mut lhs), SyntaxArm::Or(mut rhs)) if l_range == r_range => {
+      (Primary::Or(mut lhs), Primary::Or(mut rhs)) if l_range == r_range => {
         lhs.append(&mut rhs);
-        let arm = SyntaxArm::Or(lhs);
-        Syntax { arm, range: l_range }
+        let arm = Primary::Or(lhs);
+        Syntax { primary: arm, repetition: l_range }
       }
-      (SyntaxArm::Or(mut lhs), rhs) if l_range == r_range => {
-        lhs.push(Syntax { arm: rhs, range: r_range });
-        let arm = SyntaxArm::Or(lhs);
-        Syntax { arm, range: l_range }
+      (Primary::Or(mut lhs), rhs) if l_range == r_range => {
+        lhs.push(Syntax { primary: rhs, repetition: r_range });
+        let arm = Primary::Or(lhs);
+        Syntax { primary: arm, repetition: l_range }
       }
-      (lhs, SyntaxArm::Or(mut rhs)) if l_range == r_range => {
-        rhs.insert(0, Syntax { arm: lhs, range: r_range });
-        let arm = SyntaxArm::Or(rhs);
-        Syntax { arm, range: l_range }
+      (lhs, Primary::Or(mut rhs)) if l_range == r_range => {
+        rhs.insert(0, Syntax { primary: lhs, repetition: r_range });
+        let arm = Primary::Or(rhs);
+        Syntax { primary: arm, repetition: l_range }
       }
       (lhs, rhs) => {
-        let lhs = Syntax { arm: lhs, range: l_range };
-        let rhs = Syntax { arm: rhs, range: r_range };
-        Syntax { arm: SyntaxArm::Or(vec![lhs, rhs]), range: 1..=1 }
+        let lhs = Syntax { primary: lhs, repetition: l_range };
+        let rhs = Syntax { primary: rhs, repetition: r_range };
+        Syntax { primary: Primary::Or(vec![lhs, rhs]), repetition: 1..=1 }
       }
     }
   }
@@ -340,37 +275,29 @@ where
   }
 
   pub fn repetitions(self, reps: RangeInclusive<usize>) -> Self {
-    let Syntax { arm, range } = self;
+    let Syntax { primary: arm, repetition: range } = self;
     let min = *range.start() * reps.start();
     let max = *range.end() * reps.end();
-    Syntax { arm, range: RangeInclusive::new(min, max) }
+    Syntax { primary: arm, repetition: RangeInclusive::new(min, max) }
   }
 }
 
-impl<E, INPUT> Display for Syntax<E, INPUT>
-where
-  E: Item,
-  INPUT: InputSource<E>,
-{
+impl<E: Item> Display for Syntax<E> {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    let min = *self.range.start();
-    let max = *self.range.end();
+    let min = *self.repetition.start();
+    let max = *self.repetition.end();
     let repetation = if min == 1 && max == 1 {
       String::from("")
     } else if min == max {
-      format!(" * {}", min)
+      format!(" {} {}", OP_REPEAT, min)
     } else {
-      format!(" * {}..={}", min, max)
+      format!(" {} {}..={}", OP_REPEAT, min, max)
     };
-    write!(f, "{}{}", self.arm, repetation)
+    write!(f, "{}{}", self.primary, repetation)
   }
 }
 
-impl<E, INPUT> BitOr for Syntax<E, INPUT>
-where
-  E: Item,
-  INPUT: InputSource<E>,
-{
+impl<E: Item> BitOr for Syntax<E> {
   type Output = Self;
 
   fn bitor(self, rhs: Self) -> Self::Output {
@@ -378,11 +305,7 @@ where
   }
 }
 
-impl<E, INPUT> BitAnd for Syntax<E, INPUT>
-where
-  E: Item,
-  INPUT: InputSource<E>,
-{
+impl<E: Item> BitAnd for Syntax<E> {
   type Output = Self;
 
   fn bitand(self, rhs: Self) -> Self::Output {
@@ -390,11 +313,7 @@ where
   }
 }
 
-impl<E, INPUT> Mul<usize> for Syntax<E, INPUT>
-where
-  E: Item,
-  INPUT: InputSource<E>,
-{
+impl<E: Item> Mul<usize> for Syntax<E> {
   type Output = Self;
 
   fn mul(self, rhs: usize) -> Self::Output {
@@ -402,11 +321,7 @@ where
   }
 }
 
-impl<E, INPUT> Mul<std::ops::Range<usize>> for Syntax<E, INPUT>
-where
-  E: Item,
-  INPUT: InputSource<E>,
-{
+impl<E: Item> Mul<std::ops::Range<usize>> for Syntax<E> {
   type Output = Self;
 
   fn mul(self, rhs: std::ops::Range<usize>) -> Self::Output {
@@ -414,11 +329,7 @@ where
   }
 }
 
-impl<E, INPUT> Mul<RangeInclusive<usize>> for Syntax<E, INPUT>
-where
-  E: Item,
-  INPUT: InputSource<E>,
-{
+impl<E: Item> Mul<RangeInclusive<usize>> for Syntax<E> {
   type Output = Self;
 
   fn mul(self, rhs: RangeInclusive<usize>) -> Self::Output {
@@ -426,38 +337,35 @@ where
   }
 }
 
-enum SyntaxArm<E, INPUT>
-where
-  E: Item,
-  INPUT: InputSource<E>,
-{
-  Term(Box<dyn Parser<E, INPUT>>),
-  Seq(Vec<Syntax<E, INPUT>>),
-  Or(Vec<Syntax<E, INPUT>>),
+#[derive(Debug)]
+pub(crate) enum Primary<E: Item> {
+  Term(Box<dyn Matcher<E>>),
+  Seq(Vec<Syntax<E>>),
+  Or(Vec<Syntax<E>>),
 }
 
-impl<E, INPUT> Display for SyntaxArm<E, INPUT>
-where
-  E: Item,
-  INPUT: InputSource<E>,
-{
+impl<E: Item> Display for Primary<E> {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-      SyntaxArm::Term(parser) => parser.fmt(f),
-      SyntaxArm::Seq(terms) => {
+      Primary::Term(parser) => Display::fmt(parser, f),
+      Primary::Seq(terms) => {
         write!(f, "{}", terms[0])?;
         for term in terms.iter().skip(1) {
-          write!(f, " & {}", term)?;
+          write!(f, " {} {}", OP_CONCAT, term)?;
         }
         Ok(())
       }
-      SyntaxArm::Or(terms) => {
+      Primary::Or(terms) => {
         write!(f, "{}", terms[0])?;
         for term in terms.iter().skip(1) {
-          write!(f, " | {}", term)?;
+          write!(f, " {} {}", OP_CHOICE, term)?;
         }
         Ok(())
       }
     }
   }
 }
+
+pub(crate) const OP_CONCAT: &str = "&";
+pub(crate) const OP_CHOICE: &str = "|";
+pub(crate) const OP_REPEAT: &str = "*";

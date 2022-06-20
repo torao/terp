@@ -1,7 +1,7 @@
 use crate::schema::Item;
 
 #[test]
-fn item_for_char_to_single_debug() {
+fn item_for_char_debug_symbol() {
   for (expected, sample) in vec![
     ("'A'", 'A'),
     ("'\\0'", '\u{0}'),
@@ -15,22 +15,24 @@ fn item_for_char_to_single_debug() {
   ]
   .iter()
   {
-    assert_eq!(*expected, Item::to_single_debug(*sample));
+    assert_eq!(*expected, Item::debug_symbol(*sample));
   }
 }
 
 #[test]
-fn item_for_char_to_sampling_debug() {
+fn item_for_char_debug_symbols() {
   for (expected, sample) in vec![("", ""), ("ABC", "ABC"), ("A\\tB\\nC\\0", "A\tB\nC\0")].iter() {
-    assert_eq!(format!("{}...", *expected), Item::to_sampling_debug((*sample).chars().collect::<Vec<_>>(), false));
-    assert_eq!(format!("{}[EOF]", *expected), Item::to_sampling_debug((*sample).chars().collect::<Vec<_>>(), true));
+    let sample = (*sample).chars().collect::<Vec<_>>();
+    assert_eq!(*expected, Item::debug_symbols(&sample));
+    assert_eq!(format!("{}...", *expected), Item::debug_symbols_with_ellipsis(&sample, true));
+    assert_eq!(format!("{}[EOF]", *expected), Item::debug_symbols_with_ellipsis(&sample, false));
   }
 }
 
 #[test]
 fn item_for_u8_to_single_debug() {
   for b in 0u8..=0xFFu8 {
-    assert_eq!(format!("{b:02X}"), Item::to_single_debug(b));
+    assert_eq!(format!("{b:02X}"), Item::debug_symbol(b));
   }
 }
 
@@ -38,8 +40,9 @@ fn item_for_u8_to_single_debug() {
 fn item_for_u8_to_sampling_debug() {
   for b1 in 0u8..=0xFFu8 {
     for b2 in 0u8..=0xFFu8 {
-      assert_eq!(format!("{b1:02X}{b2:02X}..."), Item::to_sampling_debug(vec![b1, b2], false));
-      assert_eq!(format!("{b1:02X}{b2:02X}[EOF]"), Item::to_sampling_debug(vec![b1, b2], true));
+      assert_eq!(format!("{b1:02X}{b2:02X}"), Item::debug_symbols(&[b1, b2]));
+      assert_eq!(format!("{b1:02X}{b2:02X}..."), Item::debug_symbols_with_ellipsis(&[b1, b2], true));
+      assert_eq!(format!("{b1:02X}{b2:02X}[EOF]"), Item::debug_symbols_with_ellipsis(&[b1, b2], false));
     }
   }
 }
