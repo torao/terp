@@ -1,21 +1,9 @@
-use crate::schema::text::BytesInputSource;
+use crate::schema::Schema;
 
 use super::ascii_digit;
 
-#[tokio::test]
-async fn ascii_digit_range() {
-  let digit = ascii_digit();
-
-  let is = BytesInputSource::from_string("0");
-  digit.parse(is).await.unwrap();
-
-  let is = BytesInputSource::from_string("A");
-  digit.parse(is).await.unwrap();
-}
-
-#[tokio::test]
-async fn bytes_stream_source_read() {
-  for expected in vec![""].iter() {
-    let mut is = BytesInputSource::from_string(expected);
-  }
+#[test]
+fn schema_display() {
+  let schema = Schema::new().define("D", ascii_digit()).define("DN", ascii_digit() * (1..=100));
+  assert_eq!("D := '0'..='9'\nDN := '0'..='9' * 1..=100\n", schema.to_string());
 }

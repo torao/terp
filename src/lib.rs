@@ -5,8 +5,16 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+  #[error("Unmatched")]
+  Unmatched(),
   #[error("{0} expected, but {1} appeared")]
   Unexpected(String, String),
+  #[error("")]
+  MultipleMatches(),
+  #[error("{0:?}")]
+  Multi(Vec<Error>),
+  #[error("Cannot match anymore")]
+  CantMatchAnymore,
 
   // InputSource
   #[error("failed to decode character in {encoding}: {sequence:?} @ {position}")]
@@ -18,4 +26,14 @@ pub enum Error {
 
   #[error(transparent)]
   Io(#[from] std::io::Error),
+}
+
+impl Error {
+  pub fn errors<T>(mut errors: Vec<Error>) -> Result<T> {
+    if errors.len() == 1 {
+      Err(errors.remove(0))
+    } else {
+      Err(Error::Multi(errors))
+    }
+  }
 }
