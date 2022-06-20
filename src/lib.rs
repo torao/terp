@@ -1,20 +1,22 @@
+use schema::Item;
+
 pub mod parser;
 pub mod schema;
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<E, T> = std::result::Result<T, Error<E>>;
 
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
-  #[error("Unmatched")]
-  Unmatched(),
-  #[error("{0} expected, but {1} appeared")]
-  Unexpected(String, String),
-  #[error("")]
-  MultipleMatches(),
+pub enum Error<E: Item> {
+  #[error("{location} {expected} expected, but {actual} appeared")]
+  Unmatched { location: E::Location, expected: String, actual: String },
+  #[error("multiple syntax matches were found")]
+  MultipleMatches { location: E::Location, expecteds: Vec<String>, actual: String },
   #[error("{0:?}")]
-  Multi(Vec<Error>),
-  #[error("Cannot match anymore")]
-  CantMatchAnymore,
+  Multi(Vec<Error<E>>),
+  #[error("unable to continue due to a previous error or already finished")]
+  UnableToContinue,
+  #[error("{0}")]
+  UndefinedID(String),
 
   // InputSource
   #[error("failed to decode character in {encoding}: {sequence:?} @ {position}")]
@@ -28,8 +30,8 @@ pub enum Error {
   Io(#[from] std::io::Error),
 }
 
-impl Error {
-  pub fn errors<T>(mut errors: Vec<Error>) -> Result<T> {
+impl<E: Item> Error<E> {
+  pub fn errors<T>(mut errors: Vec<Error<E>>) -> Result<E, T> {
     if errors.len() == 1 {
       Err(errors.remove(0))
     } else {
