@@ -92,6 +92,8 @@ impl Item for u8 {
 }
 
 pub trait Location<E: Item>: Default + Copy + Display + Debug {
+  fn position(&self) -> u64;
+
   fn increment_with(&mut self, item: E);
 
   fn increment_with_seq(&mut self, items: &[E]) {

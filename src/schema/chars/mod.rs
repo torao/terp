@@ -13,6 +13,9 @@ pub struct Location {
 }
 
 impl crate::schema::Location<char> for Location {
+  fn position(&self) -> u64 {
+    self.chars
+  }
   fn increment_with(&mut self, ch: char) {
     self.chars += 1;
     if ch == '\n' {

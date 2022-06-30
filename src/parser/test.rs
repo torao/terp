@@ -66,7 +66,8 @@ fn context_eof_expected_but_valud_value_arrived() {
   parser.push('2').unwrap();
   assert_unmatch(parser.push('3'), location(3, 0, 3), "012[EOF]", "012['3']");
   assert_unmatch(parser.push('4'), location(3, 0, 3), "012[EOF]", "012['4']");
-  assert!(matches!(parser.finish(), Err(Error::UnableToContinue)));
+  parser.finish().unwrap();
+  println!("{:?}", events);
 }
 
 #[test]
@@ -188,21 +189,21 @@ fn context() {
 
 fn assert_unmatch<T: Debug>(r: Result<char, T>, l: chars::Location, e: &str, a: &str) {
   if let Err(Error::<char>::Unmatched { location, expected, actual }) = &r {
-    assert_eq!(l, *location);
-    assert_eq!(e, expected);
-    assert_eq!(a, actual);
+    assert_eq!((l, e, a), (*location, expected.as_str(), actual.as_str()));
   } else {
-    panic!("Err(Error::Unmatched) expected, but {:?}", r);
+    panic!("Err(Error::Unmatched{{expected:{:?}, actual: {:?}}}) expected, but {:?}", e, a, r);
   }
 }
 
-fn assert_eq_without_order<T: Eq + Debug>(mut expected: Vec<T>, mut actual: Vec<T>) {
+fn assert_eq_without_order<T: Clone + Eq + Debug>(mut expected: Vec<T>, mut actual: Vec<T>) {
+  let e = expected.clone();
+  let a = actual.clone();
   while let Some(expected) = expected.pop() {
     let i = actual.iter().position(|a| *a == expected);
-    let i = i.unwrap_or_else(|| panic!("{:?} not found", expected));
+    let i = i.unwrap_or_else(|| panic!("expected {:?}, but not exist in {:?}", expected, a));
     actual.remove(i);
   }
-  assert!(actual.is_empty(), "unexpected {:?} exists", actual);
+  assert!(actual.is_empty(), "expected {:?}, but {:?} exists", e, actual);
 }
 
 fn location(chars: u64, lines: u64, columns: u64) -> chars::Location {

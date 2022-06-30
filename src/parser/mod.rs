@@ -34,7 +34,9 @@ where
   location: E::Location,
   buffer: Vec<E>,
   offset_of_buffer_head: u64,
-  states: Vec<State<'s, ID, E>>,
+  ongoing: Vec<State<'s, ID, E>>,
+  prev_completed: Vec<State<'s, ID, E>>,
+  prev_unmatched: Vec<State<'s, ID, E>>,
 }
 
 impl<'s, ID, E: 'static + Item, H: FnMut(Event<ID, E>)> Context<'s, ID, E, H>
@@ -52,9 +54,14 @@ where
 
     first.event_buffer.push(Event { location: E::Location::default(), kind: EventKind::Begin(id.clone()) });
 
-    let states = first.move_to_next_term(&buffer, true)?;
     let location = E::Location::default();
-    Ok(Self { id, event_handler, location, buffer, offset_of_buffer_head: 0, states })
+    let ongoing = vec![first];
+    let prev_completed = Vec::with_capacity(16);
+    let prev_unmatched = Vec::with_capacity(16);
+    let mut initial_context =
+      Self { id, event_handler, location, buffer, offset_of_buffer_head: 0, ongoing, prev_completed, prev_unmatched };
+    initial_context.move_ongoing_states_to_next_term()?;
+    Ok(initial_context)
   }
 
   pub fn id(&self) -> &ID {
@@ -64,53 +71,22 @@ where
   pub fn push(&mut self, item: E) -> Result<E, ()> {
     println!("PUSH: {:?}", item);
 
-    // move the complete matched cursor to the next
-    let mut terminated = Vec::with_capacity(self.states.len());
-    let mut unmatched = Vec::with_capacity(self.states.len());
-    self.progress(&mut terminated, &mut unmatched, false)?;
+    self.check_error(false, Some(item))?;
 
-    // if there's no cursor to be evaluated, it means that a EOF was expected but followed value was present
-    if self.states.is_empty() {
-      return Err(self.error_unmatch_with_eof(None, Some(item)));
-    }
-
-    // reduce internal event buffer by immediate delivering if only one cursor is present
-    if self.states.len() == 1 {
-      self.states[0].flush_events(&mut self.event_handler);
+    if self.ongoing.len() == 1 {
+      self.ongoing[0].flush_events(&mut self.event_handler);
     }
 
     // reduce internal buffer if possible
-    // TODO: how often the buffer is reduced?
-    const BUFFER_SHRINKAGE_THRESHOLD: usize = 0;
-    let min_offset = self.states.iter().map(|s| s.match_begin).min().unwrap();
-    if min_offset > BUFFER_SHRINKAGE_THRESHOLD {
-      self.buffer.drain(0..min_offset);
-      self.offset_of_buffer_head += min_offset as u64;
-      for c in &mut self.states {
-        c.match_begin -= min_offset;
-      }
-    }
+    self.fit_buffer_to_min_size();
 
     // add item into buffer
     self.buffer.push(item);
     self.location.increment_with(item);
 
-    // update all in-process status and move to the next cursor if possible
-    // TODO: parallelize
-    let mut states = self.states.drain(..).collect::<Vec<_>>();
-    for state in &mut states {
-      self.evaluate(state)?;
-    }
-    self.states = states;
+    self.evaluate_ongoing_states_and_move_matched_ones_to_next_term(false)?;
 
-    if self.states.iter().all(|s| matches!(s.last_result, MatchResult::Unmatch)) {
-      let mut errors = Vec::with_capacity(self.states.len());
-      for i in 0..self.states.len() {
-        errors.push(self.error_unmatch(Some(&self.states[i])));
-      }
-      self.dispose();
-      return Error::errors(errors);
-    }
+    self.check_error(false, None)?;
 
     Ok(())
   }
@@ -118,127 +94,192 @@ where
   pub fn finish(mut self) -> Result<E, ()> {
     println!("FINISH");
 
-    if self.states.is_empty() {
-      // there should be an error in advance
-      return Err(Error::UnableToContinue);
+    self.check_error(true, None)?;
+
+    while !self.ongoing.is_empty() {
+      self.evaluate_ongoing_states_and_move_matched_ones_to_next_term(true)?;
     }
 
-    // move the complete matched cursor to the next
-    let mut terminated = Vec::with_capacity(self.states.len());
-    let mut unmatched = Vec::with_capacity(self.states.len());
-    self.progress(&mut terminated, &mut unmatched, true)?;
-    assert!(self.states.is_empty());
+    match self.prev_completed.len() {
+      1 => {
+        // notify all remaining events and success
+        self.prev_completed[0].flush_events(&mut self.event_handler);
 
-    // if unmatch
-    if terminated.is_empty() {
-      debug_assert!(!unmatched.is_empty());
-      return Error::errors(unmatched);
-    }
+        // notify end of requested syntax
+        (self.event_handler)(Event { location: self.location, kind: EventKind::End(self.id) });
 
-    // if multiple matches are detected
-    if terminated.len() > 1 {
-      let mut expecteds = Vec::with_capacity(terminated.len());
-      let mut actual = String::new();
-      for state in &terminated {
-        match self.error_unmatch_with_eof(Some(state), None) {
-          Error::Unmatched { expected, actual: a, .. } => {
-            expecteds.push(expected);
-            if actual.is_empty() {
-              actual = a;
+        Ok(())
+      }
+      0 => self.check_error(true, None),
+      _ => {
+        let mut expecteds = Vec::with_capacity(self.prev_completed.len());
+        let mut actual = String::new();
+        for state in &self.prev_completed {
+          match self.error_unmatch_with_eof(Some(state), None) {
+            Error::Unmatched { expected, actual: a, .. } => {
+              expecteds.push(expected);
+              if actual.is_empty() {
+                actual = a;
+              }
             }
+            _ => panic!(),
           }
-          _ => panic!(),
         }
+        Err(Error::MultipleMatches { location: self.location, expecteds, actual })
       }
-      return Err(Error::MultipleMatches { location: self.location, expecteds, actual });
     }
-
-    // notify all remaining events and success
-    let mut state = terminated.remove(0);
-    state.flush_events(&mut self.event_handler);
-
-    // notify end of requested syntax
-    (self.event_handler)(Event { location: self.location, kind: EventKind::End(self.id) });
-
-    Ok(())
   }
 
-  /// move the complete matched cursor to the next
-  ///
-  fn progress(
-    &mut self, terminated: &mut Vec<State<'s, ID, E>>, unmatched: &mut Vec<Error<E>>, eof: bool,
-  ) -> Result<E, ()> {
-    let mut states = self.states.drain(..).rev().collect::<Vec<_>>();
-    while let Some(mut state) = states.pop() {
-      match (state.last_result, eof) {
-        (MatchResult::Match(_), _) | (MatchResult::MatchAndCanAcceptMore, true) => {
-          if eof {
-            state.last_result = MatchResult::Match(state.match_length);
-          }
-          let mut nexts = state.clone().move_to_next_term(&self.buffer, false)?;
-          for s in &mut nexts {
-            self.evaluate(s)?;
-          }
-          if nexts.is_empty() {
-            terminated.push(state);
-          } else if eof {
-            states.append(&mut nexts);
-          } else {
-            self.states.append(&mut nexts);
-          }
+  fn move_ongoing_states_to_next_term(&mut self) -> Result<E, ()> {
+    debug_assert!(!self.ongoing.is_empty());
+    let mut ongoing = self.ongoing.drain(..).collect::<Vec<_>>();
+    let mut term_reached = Vec::with_capacity(ongoing.len());
+    while let Some(mut state) = ongoing.pop() {
+      match &state.current().primary {
+        Primary::Term(..) => {
+          term_reached.push(state);
         }
-        (MatchResult::Unmatch, _) => {
-          unmatched.push(self.error_unmatch(Some(&state)));
+        Primary::Alias(id) => {
+          let next_syntax = state.schema.get(id).ok_or_else(|| Error::UndefinedID(id.to_string()))?;
+          debug_assert!(matches!(next_syntax.primary, Primary::Seq(..)));
+          state.stack.push((next_syntax, 0));
+          state.event_buffer.push(Event { location: state.location, kind: EventKind::Begin(id.clone()) });
+          ongoing.push(state);
         }
-        (MatchResult::UnmatchAndCanAcceptMore, true) => {
-          unmatched.push(self.error_unmatch_with_eof(Some(&state), None));
+        Primary::Seq(..) => {
+          state.stack.push((state.current(), 0));
+          ongoing.push(state);
         }
-        (MatchResult::MatchAndCanAcceptMore, false) | (MatchResult::UnmatchAndCanAcceptMore, false) => {
-          self.states.push(state);
+        Primary::Or(branches) => {
+          for branch in branches {
+            let mut next = state.clone();
+            debug_assert!(matches!(branch.primary, Primary::Seq(..)));
+            next.stack.push((branch, 0));
+            ongoing.push(next);
+          }
         }
       }
     }
-
-    debug_assert!(self.states.iter().all(|s| matches!(&s.current().primary, Primary::Term(..))));
-    debug_assert!(!eof || self.states.is_empty());
-
+    debug_assert!(!term_reached.is_empty());
+    debug_assert!(term_reached.iter().all(|t| matches!(t.current().primary, Primary::Term(..))));
+    self.ongoing = term_reached;
     Ok(())
   }
 
-  fn evaluate(&self, state: &mut State<'s, ID, E>) -> Result<E, ()> {
-    state.last_result = state.matches(&self.buffer)?;
-    println!(
-      "  MATCHES: {} x {:?} => {:?}",
-      state.current(),
-      E::debug_symbols(&self.buffer[state.match_begin..]),
-      state.last_result
-    );
-    match state.last_result {
-      MatchResult::Match(_length) => {
-        // store sequence matching the current cursor in events
-        let event = state.new_fragment_event(&self.buffer);
-        state.event_buffer.push(event);
+  fn evaluate_ongoing_states_and_move_matched_ones_to_next_term(&mut self, eof: bool) -> Result<E, ()> {
+    let mut ongoing = self.ongoing.drain(..).collect::<Vec<_>>();
+    if !eof {
+      self.prev_completed.truncate(0);
+      self.prev_unmatched.truncate(0);
+    }
+
+    while let Some(mut state) = ongoing.pop() {
+      debug_assert!(matches!(state.current().primary, Primary::Term(..)));
+      match state.matches(&self.buffer)? {
+        MatchResult::Match(_) => (),
+        MatchResult::MatchAndCanAcceptMore if eof => {
+          state.last_result = MatchResult::Match(state.match_length);
+        }
+        MatchResult::Unmatch => {
+          self.prev_unmatched.push(state);
+          continue;
+        }
+        MatchResult::UnmatchAndCanAcceptMore if eof => {
+          state.last_result = MatchResult::Unmatch;
+          self.prev_unmatched.push(state);
+          continue;
+        }
+        MatchResult::MatchAndCanAcceptMore | MatchResult::UnmatchAndCanAcceptMore => {
+          self.ongoing.push(state);
+          continue;
+        }
       }
-      MatchResult::Unmatch if state.match_length > 0 => {
-        // store previous sequence matching the current cursor in events
-        let event = state.new_fragment_event(&self.buffer);
-        state.event_buffer.push(event);
-        state.last_result = MatchResult::Match(state.match_length);
+
+      debug_assert!(matches!(state.current().primary, Primary::Term(..)));
+      debug_assert!(matches!(state.last_result, MatchResult::Match(_)));
+      if state.match_length > 0 {
+        let values = self.buffer[state.match_begin..][..state.match_length].to_vec();
+        state.event_buffer.push(Event { location: state.location, kind: EventKind::Fragments(values) });
       }
-      _ => (),
+
+      let last_pointed_term = *state.stack.last().unwrap();
+      while let Some((Syntax { primary: Primary::Seq(sequence), .. }, i)) = state.stack.last_mut() {
+        if *i + 1 < sequence.len() {
+          if state.match_length > 0 {
+            state.location.increment_with_seq(&self.buffer[state.match_begin..][..state.match_length]);
+            state.match_begin += state.match_length;
+            state.match_length = 0;
+          }
+          state.repeated = 0;
+
+          *i += 1;
+          self.ongoing.push(state);
+          break;
+        }
+        if state.stack.len() == 1 {
+          state.stack = vec![last_pointed_term];
+          self.prev_completed.push(state);
+          break;
+        } else {
+          state.stack.pop();
+          if let Syntax { primary: Primary::Alias(id), .. } = state.current() {
+            state.event_buffer.push(Event { location: state.location, kind: EventKind::End(id.clone()) });
+          }
+        }
+      }
+    }
+
+    if self.ongoing.is_empty() {
+      Ok(())
+    } else {
+      self.move_ongoing_states_to_next_term()
+    }
+  }
+
+  fn check_error(&self, eof: bool, item: Option<E>) -> Result<E, ()> {
+    if self.ongoing.is_empty() {
+      return if !self.prev_completed.is_empty() {
+        if item.is_some() {
+          Err(self.error_unmatch_with_eof(None, item))
+        } else {
+          Ok(())
+        }
+      } else if !self.prev_unmatched.is_empty() {
+        let errors = self
+          .prev_unmatched
+          .iter()
+          .map(|u| if eof { self.error_unmatch_with_eof(Some(u), None) } else { self.error_unmatch(Some(u)) })
+          .collect::<Vec<_>>();
+        Error::errors(errors)
+      } else {
+        panic!("there is no outgoing or confirmed state");
+      };
     }
     Ok(())
   }
 
-  fn dispose(&mut self) {
-    self.buffer.truncate(0);
-    self.states.truncate(0);
+  fn fit_buffer_to_min_size(&mut self) {
+    // reduce internal buffer if possible
+    // TODO: how often the buffer is reduced?
+    const BUFFER_SHRINKAGE_CHECKPOINT_BIT: usize = 8;
+    const BUFFER_SHRINKAGE_CHECKPOINT: u64 = (1u64 << BUFFER_SHRINKAGE_CHECKPOINT_BIT) - 1u64;
+    if self.location.position() & BUFFER_SHRINKAGE_CHECKPOINT == BUFFER_SHRINKAGE_CHECKPOINT {
+      let states = vec![&mut self.ongoing, &mut self.prev_completed, &mut self.prev_unmatched];
+      let states = states.into_iter().flatten().collect::<Vec<_>>();
+      let min_offset = states.iter().map(|s| s.match_begin).min().unwrap();
+      if min_offset > 0 {
+        self.buffer.drain(0..min_offset);
+        self.offset_of_buffer_head += min_offset as u64;
+        for state in states {
+          state.match_begin -= min_offset;
+        }
+      }
+    }
   }
 
   fn error_unmatch(&self, expected: Option<&State<ID, E>>) -> Error<E> {
-    assert!(!self.buffer.is_empty());
     let actual = self.buffer.last().copied();
-    let buffer = &self.buffer[..(self.buffer.len() - 1)];
+    let buffer = if self.buffer.is_empty() { &self.buffer[..] } else { &self.buffer[..(self.buffer.len() - 1)] };
     Self::error_unmatch_with(self.location, buffer, self.offset_of_buffer_head, expected, actual)
   }
 
@@ -321,130 +362,12 @@ where
     })
   }
 
-  pub fn move_to_next_term(mut self, buffer: &[E], from_current: bool) -> Result<E, Vec<State<'s, ID, E>>> {
-    debug_assert!(self.match_begin + self.match_length <= buffer.len());
-
-    self.location.increment_with_seq(&buffer[self.match_begin..][..self.match_length]);
-    self.match_begin += self.match_length;
-    self.match_length = 0;
-    self.repeated = 0;
-
-    let mut in_process = if from_current { vec![self] } else { self.next()? };
-    let mut term_reached = Vec::with_capacity(in_process.len());
-    while let Some(state) = in_process.pop() {
-      match state.last_result {
-        MatchResult::Match(_) => {
-          let mut routes = state.next()?;
-          while let Some(mut route) = routes.pop() {
-            if route.is_term() {
-              route.matches(&buffer[..route.match_begin])?;
-              term_reached.push(route);
-            } else {
-              in_process.push(route);
-            }
-          }
-        }
-        MatchResult::MatchAndCanAcceptMore | MatchResult::UnmatchAndCanAcceptMore => {
-          if state.is_term() {
-            term_reached.push(state);
-          } else {
-            in_process.append(&mut state.next()?);
-          }
-        }
-        MatchResult::Unmatch => panic!(),
-      }
-    }
-    debug_assert!(term_reached.iter().all(|s| s.is_term()));
-
-    Ok(term_reached)
-  }
-
-  fn next(mut self) -> Result<E, Vec<State<'s, ID, E>>> {
-    // refer to the deepest sequence in the stack and the index being currently evaluated
-    let (sequence, index) = match self.stack.last_mut() {
-      Some((Syntax { primary: Primary::Seq(sequence), .. }, index)) => (sequence, index),
-      _ => panic!("stack frame contains non-sequence syntax: {:?}", self.stack),
-    };
-    debug_assert!(*index < sequence.len());
-
-    let routes = match &sequence[*index].primary {
-      Primary::Term(..) => {
-        print!("  MOVE: {} => ", &sequence[*index]);
-        if *index + 1 < sequence.len() {
-          *index += 1;
-          println!("{}", &sequence[*index]);
-          self.last_result = MatchResult::UnmatchAndCanAcceptMore;
-          vec![self]
-        } else {
-          self.stack.pop();
-          while !self.stack.is_empty() {
-            if let Some((Syntax { primary: Primary::Seq(seq), .. }, i)) = self.stack.last_mut() {
-              if *i + 1 < seq.len() {
-                *i += 1;
-                println!("{}", &seq[*i]);
-                self.last_result = MatchResult::UnmatchAndCanAcceptMore;
-                break;
-              }
-            } else {
-              panic!("stack frame contains non-sequence syntax: {:?}", self.stack);
-            }
-            self.stack.pop();
-          }
-          // the stack frame to be evaluated is the topmost one
-          if self.stack.is_empty() {
-            println!("EOF");
-            vec![]
-          } else {
-            vec![self]
-          }
-        }
-      }
-      Primary::Seq(_) => {
-        let seq = &sequence[*index];
-        self.stack.push((seq, 0));
-        vec![self]
-      }
-      Primary::Alias(id) => {
-        let syntax = if let Some(syntax) = self.schema.get(id) {
-          assert!(matches!(syntax.primary, Primary::Seq(_)));
-          syntax
-        } else {
-          return Err(Error::UndefinedID(id.to_string()));
-        };
-        self.stack.push((syntax, 0));
-        vec![self]
-      }
-      Primary::Or(branches) => {
-        let mut routes = Vec::with_capacity(branches.len());
-        for branch in branches {
-          assert!(matches!(branch.primary, Primary::Seq(_)));
-          let mut state = self.clone();
-          state.stack.push((branch, 0));
-          routes.push(state);
-        }
-        routes
-      }
-    };
-    Ok(routes)
-  }
-
   pub fn current(&self) -> &'s Syntax<ID, E> {
     if let Some((Syntax { primary: Primary::Seq(sequence), .. }, index)) = self.stack.last() {
       &sequence[*index]
     } else {
-      panic!()
+      panic!("unexpected deepest stack frame: {:?}", self.stack.last());
     }
-  }
-
-  pub fn is_term(&self) -> bool {
-    matches!(self.current(), Syntax { primary: Primary::Term(_), .. })
-  }
-
-  pub fn new_fragment_event(&self, buffer: &[E]) -> Event<ID, E> {
-    let values = buffer[self.match_begin..][..self.match_length].to_vec();
-    let location = self.location;
-    let kind = EventKind::Fragments(values);
-    Event { location, kind }
   }
 
   pub fn flush_events<H: FnMut(Event<ID, E>)>(&mut self, handler: &mut H) {
@@ -456,34 +379,44 @@ where
   pub fn matches(&mut self, buffer: &[E]) -> Result<E, MatchResult> {
     debug_assert!(buffer.len() >= self.match_begin + self.match_length);
 
-    let result = if let Primary::Term(matcher) = &self.current().primary {
-      let repetition = self.current().repetition.clone();
-      match matcher.matches(&buffer[(self.match_begin + self.match_length)..])? {
-        MatchResult::Match(length) => {
-          self.repeated += 1;
-          self.match_length += length;
-          if self.repeated < *repetition.start() {
-            MatchResult::UnmatchAndCanAcceptMore
-          } else if repetition.contains(&(self.repeated + 1)) {
-            MatchResult::MatchAndCanAcceptMore
-          } else {
-            debug_assert_eq!(*repetition.end(), self.repeated);
-            MatchResult::Match(self.match_length)
-          }
-        }
-        MatchResult::Unmatch => {
-          if repetition.contains(&self.repeated) {
-            MatchResult::Match(self.match_length)
-          } else {
-            debug_assert!(self.repeated < *repetition.start());
-            MatchResult::Unmatch
-          }
-        }
-        result => result,
-      }
+    let reps = self.current().repetition.clone();
+    if self.repeated == *reps.end() {
+      return Ok(MatchResult::Match(self.match_length));
+    }
+    debug_assert!(self.repeated < *reps.end(), "{} >= {}", self.repeated, reps.end());
+
+    let matcher = if let Primary::Term(matcher) = &self.current().primary {
+      matcher
     } else {
       panic!("current syntax is not term(matcher): {:?}", self.current())
     };
+
+    let buffer = &buffer[(self.match_begin + self.match_length)..];
+    let result = match matcher.matches(buffer)? {
+      MatchResult::Match(length) => {
+        self.repeated += 1;
+        self.match_length += length;
+        if self.repeated < *reps.start() {
+          MatchResult::UnmatchAndCanAcceptMore
+        } else if reps.contains(&(self.repeated + 1)) {
+          MatchResult::MatchAndCanAcceptMore
+        } else {
+          debug_assert_eq!(*reps.end(), self.repeated);
+          MatchResult::Match(self.match_length)
+        }
+      }
+      MatchResult::Unmatch => {
+        if reps.contains(&self.repeated) {
+          MatchResult::Match(self.match_length)
+        } else {
+          debug_assert!(self.repeated < *reps.start());
+          MatchResult::Unmatch
+        }
+      }
+      MatchResult::UnmatchAndCanAcceptMore if reps.contains(&self.repeated) => MatchResult::MatchAndCanAcceptMore,
+      result => result,
+    };
+
     self.last_result = result;
     Ok(result)
   }
