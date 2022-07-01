@@ -77,6 +77,12 @@ fn syntax_repetition() {
 }
 
 #[test]
+fn syntax_repetition_for_sequence() {
+  let s = (((ascii_alphabetic::<String>() & ascii_digit()) * 2) & ((ascii_digit() & ascii_digit()) * 3)) * (1..=2);
+  assert_eq!("((ASCII_ALPHA, ASCII_DIGIT){2}, (ASCII_DIGIT, ASCII_DIGIT){3}){1,2}", s.to_string());
+}
+
+#[test]
 fn patterned_single_item() {
   let s: Syntax<String, char> = patterned_single_item!(FOO, '0'..='9' | 'a'..='f' | 'A'..='F');
   match s {
@@ -119,7 +125,7 @@ fn match_result() {
     match (m1, m2) {
       (MatchResult::Match(x), MatchResult::Match(y)) => assert_eq!(x, y),
       (MatchResult::Unmatch, MatchResult::Unmatch) => (),
-      (MatchResult::MatchAndCanAcceptMore, MatchResult::MatchAndCanAcceptMore) => (),
+      (MatchResult::MatchAndCanAcceptMore(_), MatchResult::MatchAndCanAcceptMore(_)) => (),
       (MatchResult::UnmatchAndCanAcceptMore, MatchResult::UnmatchAndCanAcceptMore) => (),
       _ => panic!(),
     }
@@ -131,7 +137,7 @@ fn match_result() {
 
   assert!(MatchResult::Match(0).is_match());
   assert!(!MatchResult::Unmatch.is_match());
-  assert!(MatchResult::MatchAndCanAcceptMore.is_match());
+  assert!(MatchResult::MatchAndCanAcceptMore(0).is_match());
   assert!(!MatchResult::UnmatchAndCanAcceptMore.is_match());
 }
 
