@@ -104,10 +104,9 @@ where
     match self.prev_completed.len() {
       1 => {
         // notify all remaining events and success
+        self.prev_completed[0].completed();
+        self.prev_completed[0].events_push(Event { location: self.location, kind: EventKind::End(self.id) });
         self.prev_completed[0].events_flush_to(&mut self.event_handler);
-
-        // notify end of requested syntax
-        (self.event_handler)(Event { location: self.location, kind: EventKind::End(self.id) });
 
         Ok(())
       }

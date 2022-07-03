@@ -81,7 +81,14 @@ where
     (matched, true)
   }
 
+  pub fn completed(&mut self) {
+    self.stack_pop(self.stack.len() - 1);
+    debug_assert!(self.stack.len() == 1);
+    debug_assert!(self.stack[0].current + 1 == self.stack[0].parent.len());
+  }
+
   pub fn stack_push_alias(&mut self, id: &ID) -> Result<E, ()> {
+    println!("~ begined: {}", id);
     self.stack_push(Self::get_definition(id, self.schema)?);
     Ok(())
   }
@@ -97,8 +104,10 @@ where
 
   fn stack_pop(&mut self, count: usize) {
     for _ in 0..count {
-      let StackFrame { state, .. } = self.stack.pop().unwrap();
-      if let Syntax { primary: Primary::Alias(id), .. } = state.syntax() {
+      let StackFrame { state, parent, current } = self.stack.pop().unwrap();
+      debug_assert!(current + 1 == parent.len());
+      if let Syntax { primary: Primary::Alias(id), .. } = self.current().syntax() {
+        println!("~ ended: {}", id);
         self.events_push(state.event(EventKind::End(id.clone())));
       }
       self.current_mut().match_begin = state.match_begin;

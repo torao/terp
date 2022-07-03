@@ -59,7 +59,7 @@ impl<ID: Debug, E: Item> Debug for Schema<ID, E> {
   }
 }
 
-pub trait Item: 'static + Copy + Send + Sync + Display + Debug {
+pub trait Item: 'static + Copy + Clone + Send + Sync + PartialEq + Eq + Display + Debug {
   type Location: Location<Self>;
 
   fn debug_symbol(value: Self) -> String {
@@ -67,9 +67,6 @@ pub trait Item: 'static + Copy + Send + Sync + Display + Debug {
     Self::debug_symbols(&values)
   }
   fn debug_symbols(values: &[Self]) -> String;
-  fn debug_symbols_with_ellipsis(values: &[Self], ellipsis: bool) -> String {
-    Self::debug_symbols(values) + if ellipsis { "..." } else { "[EOF]" }
-  }
 }
 
 impl Item for char {
