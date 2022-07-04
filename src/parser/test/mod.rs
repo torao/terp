@@ -5,6 +5,8 @@ use crate::{Error, Result};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 
+mod zero_repetition;
+
 #[test]
 fn event() {
   let location = chars::Location::default();
@@ -18,42 +20,23 @@ fn event() {
 }
 
 #[test]
-fn context_with_enum_id() {
-  #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-  enum X {
-    A,
-    B,
-  }
-  impl Display for X {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-      Debug::fmt(self, f)
-    }
-  }
-  let schema =
-    Schema::new("Foo").define(X::A, ascii_digit() * 5).define(X::B, ascii_alphabetic() & Syntax::from_id(X::A));
-  let mut events = Vec::new();
-  let handler = |e: Event<_, _>| {
-    events.push(e);
-  };
-  let _ = Context::new(&schema, X::B, handler);
-}
-
-#[test]
 fn context_for_signle_def_single_term() {
   let a = ascii_digit() * 3;
   let schema = Schema::new("Foo").define("A", a);
 
   let mut events = Vec::new();
-  let handler = |e: Event<_, _>| {
-    println!("  RECEIVED: {:?}", e);
-    events.push(e);
-  };
+  let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('0').unwrap();
   parser.push('1').unwrap();
   parser.push('2').unwrap();
   parser.finish().unwrap();
   Events::new().begin("A").fragments("012").end().assert_eq(&events);
+
+  let mut events = Vec::new();
+  let handler = |e: Event<_, _>| events.push(e);
+  let parser = Context::new(&schema, "A", handler).unwrap();
+  assert_unmatch(parser.finish(), location(0, 0, 0), "[ASCII_DIGIT{3}]", "[EOF]");
 }
 
 #[test]
@@ -148,7 +131,7 @@ fn context_match_following_match_within_repetition_range() {
   let mut events = Vec::new();
   let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
-  assert_unmatch(parser.push('X'), location(1, 0, 1), "[ASCII_DIGIT{1,3}]", "['X']");
+  assert_unmatch(parser.push('X'), location(0, 0, 0), "[ASCII_DIGIT{1,3}]", "['X']");
 
   for digits in &["0", "01", "012"] {
     let mut events = Vec::new();
@@ -196,7 +179,7 @@ fn context_events_nested() {
 }
 
 #[test]
-fn context() {
+fn context_with_enum_id() {
   #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
   enum X {
     A,
@@ -229,6 +212,9 @@ fn context() {
   Events::new().begin(X::B).fragments("E").begin(X::A).fragments("01234").end().end().assert_eq(&events);
 }
 
+#[test]
+fn context_error_unmatch_labels() {}
+
 fn assert_unmatch<T: Debug>(r: Result<char, T>, l: chars::Location, e: &str, a: &str) {
   if let Err(Error::<char>::Unmatched { location, expected, actual }) = &r {
     assert_eq!((l, e, a), (*location, expected.as_str(), actual.as_str()));
@@ -260,7 +246,7 @@ fn location(chars: u64, lines: u64, columns: u64) -> chars::Location {
   chars::Location { chars, lines, columns }
 }
 
-struct Events<ID: Clone + Display + Debug + Eq> {
+pub struct Events<ID: Clone + Display + Debug + Eq> {
   location: chars::Location,
   events: Vec<Event<ID, char>>,
   stack: Vec<ID>,

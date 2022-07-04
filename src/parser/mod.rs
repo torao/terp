@@ -53,13 +53,10 @@ where
     first.events_push(first.current().event(EventKind::Begin(id.clone())));
 
     let location = E::Location::default();
-    let ongoing = vec![first];
+    let ongoing = Self::move_ongoing_paths_to_next_term(first)?;
     let prev_completed = Vec::with_capacity(16);
     let prev_unmatched = Vec::with_capacity(16);
-    let mut initial_context =
-      Self { id, event_handler, location, buffer, offset_of_buffer_head: 0, ongoing, prev_completed, prev_unmatched };
-    initial_context.move_ongoing_paths_to_next_term()?;
-    Ok(initial_context)
+    Ok(Self { id, event_handler, location, buffer, offset_of_buffer_head: 0, ongoing, prev_completed, prev_unmatched })
   }
 
   pub fn id(&self) -> &ID {
@@ -127,9 +124,8 @@ where
     }
   }
 
-  fn move_ongoing_paths_to_next_term(&mut self) -> Result<E, ()> {
-    debug_assert!(!self.ongoing.is_empty());
-    let mut ongoing = self.ongoing.drain(..).collect::<Vec<_>>();
+  fn move_ongoing_paths_to_next_term(path: Path<'s, ID, E>) -> Result<E, Vec<Path<'s, ID, E>>> {
+    let mut ongoing = vec![path];
     let mut term_reached = Vec::with_capacity(ongoing.len());
     while let Some(mut path) = ongoing.pop() {
       match &path.current().syntax().primary {
@@ -160,8 +156,7 @@ where
     }
     debug_assert!(!term_reached.is_empty());
     debug_assert!(term_reached.iter().all(|t| matches!(t.current().syntax().primary, Primary::Term(..))));
-    self.ongoing = term_reached;
-    Ok(())
+    Ok(term_reached)
   }
 
   fn evaluate_ongoing_paths_and_move_matched_ones_to_next_term(&mut self, eof: bool) -> Result<E, ()> {
@@ -173,62 +168,44 @@ where
 
     while let Some(mut path) = ongoing.pop() {
       debug_assert!(matches!(path.current().syntax().primary, Primary::Term(..)));
-      match path.current_mut().matches(&self.buffer, eof)? {
-        Matching::Match(event) => {
+
+      let matched = match path.current_mut().matches(&self.buffer, eof)? {
+        Matching::Match(_length, event) => {
           if let Some(event) = event {
-            if let Event { kind: EventKind::Fragments(values), .. } = &event {
-              println!(
-                "~ matched: {}({}) -> [{}]",
-                path.current().syntax(),
-                E::debug_symbols(&self.buffer[path.current().match_begin..]),
-                E::debug_symbols(values)
-              );
-            }
             path.events_push(event);
-          } else {
-            println!(
-              "~ matched: {}({}) -> no data",
-              path.current().syntax(),
-              E::debug_symbols(&self.buffer[path.current().match_begin..]),
-            );
           }
           debug_assert!(matches!(path.current().syntax().primary, Primary::Term(..)));
+          true
+        }
+        Matching::Unmatch => false,
+        Matching::More => {
+          self.ongoing.push(path);
+          continue;
+        }
+      };
 
-          let (_, completed) = path.move_to_next(&self.buffer, true, eof);
-          if !completed {
-            self.ongoing.push(path);
+      match path.move_to_next(&self.buffer, matched, eof) {
+        (true, true) => {
+          let uncapture_exists = path.current().match_begin + path.current().match_length < self.buffer.len();
+          if uncapture_exists {
+            self.prev_unmatched.push(path);
           } else {
             self.prev_completed.push(path);
           }
         }
-        Matching::Unmatch => {
-          println!(
-            "~ unmatched: {}({})",
-            path.current().syntax(),
-            E::debug_symbols(&self.buffer[path.current().match_begin..]),
-          );
-          let (matched, completed) = path.move_to_next(&self.buffer, false, eof);
-          if matched {
-            if !completed {
-              self.ongoing.push(path);
-            } else {
-              self.prev_completed.push(path);
-            }
+        (true, _) => {
+          let uncapture_exists = path.current().match_begin + path.current().match_length < self.buffer.len();
+          if uncapture_exists {
+            ongoing.append(&mut Self::move_ongoing_paths_to_next_term(path)?);
           } else {
-            self.prev_unmatched.push(path);
+            self.ongoing.append(&mut Self::move_ongoing_paths_to_next_term(path)?);
           }
         }
-        Matching::More => {
-          self.ongoing.push(path);
-        }
+        (false, _) => self.prev_unmatched.push(path),
       }
     }
 
-    if self.ongoing.is_empty() {
-      Ok(())
-    } else {
-      self.move_ongoing_paths_to_next_term()
-    }
+    Ok(())
   }
 
   fn check_error(&self, eof: bool, item: Option<E>) -> Result<E, ()> {
@@ -280,13 +257,15 @@ where
   }
 
   fn error_unmatch(&self, expected: Option<&State<ID, E>>) -> Error<E> {
+    let location = expected.map(|s| s.location).unwrap_or(self.location);
     let actual = self.buffer.last().copied();
     let buffer = if self.buffer.is_empty() { &self.buffer[..] } else { &self.buffer[..(self.buffer.len() - 1)] };
-    Self::error_unmatch_with(self.location, buffer, self.offset_of_buffer_head, expected, actual)
+    Self::error_unmatch_with(location, buffer, self.offset_of_buffer_head, expected, actual)
   }
 
   fn error_unmatch_with_eof(&self, expected: Option<&State<ID, E>>, actual: Option<E>) -> Error<E> {
-    Self::error_unmatch_with(self.location, &self.buffer, self.offset_of_buffer_head, expected, actual)
+    let location = expected.map(|s| s.location).unwrap_or(self.location);
+    Self::error_unmatch_with(location, &self.buffer, self.offset_of_buffer_head, expected, actual)
   }
 
   fn error_unmatch_with(

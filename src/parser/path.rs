@@ -46,37 +46,39 @@ where
       let stack_position = self.stack.len() - i - 1;
       let StackFrame { state, current, parent } = &mut self.stack[stack_position];
       debug_assert!(state.appearances <= *state.syntax().repetition.end());
-      if !matched && state.appearances >= *state.syntax().repetition.start() {
-        println!("~ corrected: {} / {} (Matched)", state.syntax(), state.appearances);
-        matched = true;
-      }
-      if !matched {
-        continue;
+
+      if matched {
+        state.appearances += 1;
       }
 
-      state.appearances += 1;
-      if !eof {
-        if state.appearances < *state.syntax().repetition.end() {
-          println!("~ repeated: {} / {}", state.syntax(), state.appearances);
-          state.proceed_along_buffer(buffer);
+      matched = match (matched, eof) {
+        (true, true) => state.appearances >= *state.syntax().repetition.start(),
+        (true, false) => {
+          if state.appearances < *state.syntax().repetition.end() {
+            println!("~ repeated: {} / {}", state.syntax(), state.appearances);
+            state.proceed_along_buffer(buffer);
+            self.stack_pop(i);
+            return (true, false);
+          }
+          debug_assert!(state.appearances == *state.syntax().repetition.end());
+          true
+        }
+        (false, _) => state.appearances >= *state.syntax.repetition.start(),
+      };
+
+      if matched {
+        state.proceed_along_buffer(buffer);
+        if *current + 1 < parent.len() {
+          println!("~ moved: {} -> {}", parent[*current], parent[*current + 1]);
+          state.appearances = 0;
+          state.syntax = &parent[*current + 1];
+          *current += 1;
           self.stack_pop(i);
           return (true, false);
         }
-      } else if state.appearances < *state.syntax().repetition.start() {
-        matched = false;
-        continue;
-      }
-
-      state.proceed_along_buffer(buffer);
-      if *current + 1 < parent.len() {
-        println!("~ moved: {} -> {}", parent[*current], parent[*current + 1]);
-        state.appearances = 0;
-        state.syntax = &parent[*current + 1];
-        *current += 1;
-        self.stack_pop(i);
-        return (true, false);
       }
     }
+
     println!("~ confirmed: {} ({})", self.current().syntax(), if matched { "Matched" } else { "Unmatched" });
     (matched, true)
   }
@@ -175,7 +177,7 @@ pub struct State<'s, ID, E: Item>
 where
   ID: Clone + Display + Debug,
 {
-  location: E::Location,
+  pub location: E::Location,
   pub match_begin: usize,
   pub match_length: usize,
   pub appearances: usize,
@@ -199,10 +201,12 @@ where
   pub fn matches(&mut self, buffer: &[E], eof: bool) -> Result<E, Matching<ID, E>> {
     debug_assert!(buffer.len() >= self.match_begin + self.match_length);
 
+    let items = &buffer[self.match_begin..];
     let reps = &self.syntax.repetition;
     debug_assert!(self.appearances <= *reps.end());
     if !self.can_repeate_more() {
-      return Ok(Matching::Match(None));
+      println!("~ matched: {}({}) -> no data", self.syntax(), E::debug_symbols(items),);
+      return Ok(Matching::Match(0, None));
     }
 
     let matcher = if let Primary::Term(matcher) = &self.syntax.primary {
@@ -211,7 +215,7 @@ where
       panic!("current syntax is not term(matcher): {:?}", self.syntax)
     };
 
-    let result = match matcher.matches(&buffer[self.match_begin..])? {
+    let result = match matcher.matches(items)? {
       MatchResult::UnmatchAndCanAcceptMore if eof => MatchResult::Unmatch,
       MatchResult::MatchAndCanAcceptMore(length) if eof => MatchResult::Match(length),
       result => result,
@@ -221,15 +225,11 @@ where
       MatchResult::Match(length) => {
         self.match_length = length;
         let values = self.extract(buffer).to_vec();
-        let e = self.event(EventKind::Fragments(values));
-        Matching::Match(Some(e))
+        println!("~ matched: {}({}) -> [{}]", self.syntax(), E::debug_symbols(items), E::debug_symbols(&values));
+        Matching::Match(length, Some(self.event(EventKind::Fragments(values))))
       }
       MatchResult::Unmatch => {
-        // if reps.contains(&self.appearances) {
-        //   Matching::Match(None)
-        // } else {
-        //   debug_assert!(self.appearances < *reps.start());
-        // }
+        println!("~ unmatched: {}({})", self.syntax(), E::debug_symbols(items),);
         Matching::Unmatch
       }
       MatchResult::MatchAndCanAcceptMore(_) | MatchResult::UnmatchAndCanAcceptMore => Matching::More,
@@ -268,7 +268,7 @@ pub enum Matching<ID, E: Item>
 where
   ID: Clone + Display + Debug,
 {
-  Match(Option<Event<ID, E>>),
+  Match(usize, Option<Event<ID, E>>),
   More,
   Unmatch,
 }

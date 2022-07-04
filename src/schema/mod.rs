@@ -219,7 +219,9 @@ impl<ID: Display + Debug, E: Item> Display for Syntax<ID, E> {
       Display::fmt(&self.primary, f)?;
     }
     if show_reps {
-      if min == max {
+      if min == 0 && max == 1 {
+        write!(f, "?")
+      } else if min == max {
         write!(f, "{{{}}}", min)
       } else {
         write!(f, "{{{},{}}}", min, max)
