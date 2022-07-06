@@ -394,3 +394,28 @@ macro_rules! patterned_single_item {
 }
 
 pub use patterned_single_item;
+
+pub fn seq<ID, E: Item>(items: &[E]) -> Syntax<ID, E> {
+  #[derive(Debug)]
+  struct SeqMatcher<E: Item> {
+    items: Vec<E>,
+  }
+  impl<E: Item> Matcher<E> for SeqMatcher<E> {
+    fn matches(&self, values: &[E]) -> Result<E, MatchResult> {
+      let min = std::cmp::min(self.items.len(), values.len());
+      for (i, value) in values.iter().take(min).enumerate() {
+        if *value != self.items[i] {
+          return Ok(MatchResult::Unmatch);
+        }
+      }
+      Ok(if min < self.items.len() { MatchResult::UnmatchAndCanAcceptMore } else { MatchResult::Match(min) })
+    }
+  }
+  impl<E: Item> Display for SeqMatcher<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+      f.write_str(&E::debug_symbols(&self.items))
+    }
+  }
+  let items = items.to_vec();
+  Syntax::with_primary(Primary::Term(Box::new(SeqMatcher { items })))
+}

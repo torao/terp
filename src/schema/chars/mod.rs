@@ -2,8 +2,15 @@ use crate::schema::{patterned_single_item, MatchResult, Syntax};
 use crate::Result;
 use std::fmt::{Debug, Display};
 
+use super::seq;
+
 #[cfg(test)]
 mod test;
+
+#[inline]
+pub fn token<ID>(token: &str) -> Syntax<ID, char> {
+  seq(&token.chars().collect::<Vec<_>>())
+}
 
 #[derive(Default, Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Location {

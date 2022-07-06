@@ -119,7 +119,7 @@ where
   }
 
   pub fn events_push(&mut self, e: Event<ID, E>) {
-    self.event_buffer.push(e);
+    Event::append(&mut self.event_buffer, e);
   }
 
   pub fn events_flush_to<H: FnMut(Event<ID, E>)>(&mut self, handler: &mut H) {
@@ -212,7 +212,7 @@ where
     let matcher = if let Primary::Term(matcher) = &self.syntax.primary {
       matcher
     } else {
-      panic!("current syntax is not term(matcher): {:?}", self.syntax)
+      unreachable!("Current syntax is not Primary::Term(matcher): {:?}", self.syntax)
     };
 
     let result = match matcher.matches(items)? {

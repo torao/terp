@@ -18,6 +18,30 @@ where
   pub kind: EventKind<ID, E>,
 }
 
+impl<ID, E: Item> Event<ID, E>
+where
+  ID: Clone + Display + Debug,
+{
+  pub fn append(events: &mut Vec<Event<ID, E>>, mut e: Event<ID, E>) {
+    if let (Event { kind: EventKind::Fragments(items), .. }, Some(Event { kind: EventKind::Fragments(current), .. })) =
+      (&mut e, events.last_mut())
+    {
+      current.append(items);
+    } else {
+      events.push(e);
+    }
+  }
+
+  pub fn normalize(mut events: Vec<Event<ID, E>>) -> Vec<Event<ID, E>> {
+    let mut norm = Vec::with_capacity(events.len());
+    for e in events.drain(..) {
+      Self::append(&mut norm, e);
+    }
+    norm.shrink_to_fit();
+    norm
+  }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EventKind<ID, E: Item>
 where
@@ -148,7 +172,7 @@ where
               next.stack_push(seq);
               ongoing.push(next);
             } else {
-              panic!()
+              unreachable!("Primary::Or contains a branch other than Seq")
             }
           }
         }
@@ -230,7 +254,7 @@ where
           .collect::<Vec<_>>();
         Error::errors(errors)
       } else {
-        panic!("there is no outgoing or confirmed state");
+        unreachable!("There is no outgoing or confirmed state");
       };
     }
     Ok(())
@@ -304,5 +328,17 @@ where
       format!("{}{}[{}]", prefix, sample, suffix)
     };
     (expected, actual)
+  }
+}
+
+impl<'s, ID, H: FnMut(Event<ID, char>)> Context<'s, ID, char, H>
+where
+  ID: 's + Clone + Hash + Eq + Ord + Display + Debug,
+{
+  pub fn push_str(&mut self, s: &str) -> Result<char, ()> {
+    for ch in s.chars() {
+      self.push(ch)?;
+    }
+    Ok(())
   }
 }

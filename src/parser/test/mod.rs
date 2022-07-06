@@ -1,5 +1,5 @@
 use crate::parser::{Context, Event, EventKind};
-use crate::schema::chars::{self, ascii_alphabetic, ascii_digit};
+use crate::schema::chars::{self, ascii_alphabetic, ascii_digit, token};
 use crate::schema::{Item, Location, Schema, Syntax};
 use crate::{Error, Result};
 use std::fmt::{Debug, Display};
@@ -215,11 +215,69 @@ fn context_with_enum_id() {
 #[test]
 fn context_error_unmatch_labels() {}
 
+#[test]
+fn context_seq_keywords() {
+  let keywords = [
+    "Self", "abstract", "as", "async", "await", "become", "box", "break", "const", "continue", "crate", "do", "dyn",
+    "else", "enum", "extern", "false", "final", "fn", "for", "if", "impl", "in", "let", "loop", "macro", "match",
+    "mod", "move", "mut", "override", "priv", "pub", "ref", "return", "self", "static", "struct", "super", "trait",
+    "true", "try", "type", "typeof", "union", "unsafe", "unsized", "use", "virtual", "where", "while", "yield",
+  ];
+
+  let a = keywords.iter().map(|kwd| token(*kwd)).reduce(|a, b| a | b).unwrap();
+  let schema = Schema::new("Foo").define("A", a);
+  for kwd in &keywords {
+    let mut events = Vec::new();
+    let handler = |e: Event<_, _>| events.push(e);
+    let mut parser = Context::new(&schema, "A", handler).unwrap();
+    parser.push_str(kwd).unwrap();
+    parser.finish().unwrap();
+    Events::new().begin("A").fragments(kwd).end().assert_eq(&events);
+
+    let mut events = Vec::new();
+    let handler = |e: Event<_, _>| events.push(e);
+    let parser = Context::new(&schema, "A", handler).unwrap();
+    let expecteds = keywords.iter().map(|kwd| format!("[{}]", kwd)).collect::<Vec<_>>();
+    assert_multiple_unmatches(parser.finish(), location(0, 0, 0), &expecteds, "[EOF]");
+
+    let mut events = Vec::new();
+    let handler = |e: Event<_, _>| events.push(e);
+    let mut parser = Context::new(&schema, "A", handler).unwrap();
+    let expecteds = keywords.iter().map(|kwd| format!("[{}]", kwd)).collect::<Vec<_>>();
+    assert_multiple_unmatches(parser.push('X'), location(0, 0, 0), &expecteds, "['X']");
+
+    let mut events = Vec::new();
+    let handler = |e: Event<_, _>| events.push(e);
+    let mut parser = Context::new(&schema, "A", handler).unwrap();
+    parser.push_str(kwd).unwrap();
+    assert!(matches!(parser.push('X'), Err(Error::<char>::Unmatched { .. }))); // various errors
+  }
+}
+
 fn assert_unmatch<T: Debug>(r: Result<char, T>, l: chars::Location, e: &str, a: &str) {
   if let Err(Error::<char>::Unmatched { location, expected, actual }) = &r {
     assert_eq!((l, e, a), (*location, expected.as_str(), actual.as_str()));
   } else {
-    panic!("Err(Error::Unmatched{{expected:{:?}, actual: {:?}}}) expected, but {:?}", e, a, r);
+    panic!("Err(Error::Unmatched{{expected: {:?}, actual: {:?}}}) expected, but {:?}", e, a, r);
+  }
+}
+
+fn assert_multiple_unmatches<T: Debug>(r: Result<char, T>, l: chars::Location, e: &[String], a: &str) {
+  if let Err(Error::Multi(errs)) = r {
+    let expecteds = errs
+      .iter()
+      .map(|err| {
+        if let Error::Unmatched { location, expected, actual } = err {
+          assert_eq!((&l, a), (location, actual.as_str()));
+          expected.to_string()
+        } else {
+          panic!("{:?}", err);
+        }
+      })
+      .collect::<Vec<_>>();
+    assert_eq_without_order(e.to_vec(), expecteds);
+  } else {
+    panic!("{:?}", r);
   }
 }
 
@@ -236,9 +294,11 @@ fn assert_eq_without_order<T: Clone + Eq + Debug + From<U>, U>(expected: Vec<U>,
 }
 
 fn assert_events_eq<ID: Clone + Display + Debug + Eq>(expected: &[Event<ID, char>], actual: &[Event<ID, char>]) {
+  let expected = Event::normalize(expected.to_vec());
+  let actual = Event::normalize(actual.to_vec());
   let len = std::cmp::max(expected.len(), actual.len());
   for i in 0..len {
-    assert_eq!(expected.get(i), actual.get(i), "unexpected event at {}", i);
+    assert_eq!(expected.get(i), actual.get(i), "unexpected event @{}:\n  {:?}\n  {:?}", i, expected, actual);
   }
 }
 
