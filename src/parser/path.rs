@@ -294,13 +294,13 @@ where
       return Ok(Matching::Match(0, None));
     }
 
-    let matcher = if let Primary::Term(matcher) = &self.syntax.primary {
+    let matcher = if let Primary::Term(_, matcher) = &self.syntax.primary {
       matcher
     } else {
       unreachable!("Current syntax is not Primary::Term(matcher): {:?}", self.syntax)
     };
 
-    let result = match matcher.matches(items)? {
+    let result = match matcher(items)? {
       MatchResult::UnmatchAndCanAcceptMore if eof => MatchResult::Unmatch,
       MatchResult::MatchAndCanAcceptMore(length) if eof => MatchResult::Match(length),
       result => result,

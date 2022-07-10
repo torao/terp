@@ -36,13 +36,31 @@ fn range() {
   let _ = format!("{}", syntax);
 }
 
+#[test]
+fn one_of_seqs() {
+  use itertools::Itertools;
+  use MatchResult::*;
+  for seqs in [vec!['a'], vec!['a', 'a'], vec!['b', 'a']].iter().permutations(3) {
+    let seqs = seqs.into_iter().cloned().collect::<Vec<_>>();
+    let syntax = super::one_of_seqs::<String, _>(&seqs);
+    assert_match_str(&syntax, "", Ok(UnmatchAndCanAcceptMore));
+    assert_match_str(&syntax, "a", Ok(MatchAndCanAcceptMore(1)));
+    assert_match_str(&syntax, "b", Ok(UnmatchAndCanAcceptMore));
+    assert_match_str(&syntax, "c", Ok(Unmatch));
+    assert_match_str(&syntax, "aa", Ok(Match(2)));
+    assert_match_str(&syntax, "ab", Ok(Match(1)));
+    assert_match_str(&syntax, "ac", Ok(Match(1)));
+    assert_match_str(&syntax, "ba", Ok(Match(2)));
+    assert_match_str(&syntax, "bc", Ok(Unmatch));
+  }
+}
+
 fn assert_match_str<ID>(syntax: &Syntax<ID, char>, values: &str, expected: Result<char, MatchResult>) {
   let values = values.chars().collect::<Vec<_>>();
   assert_match(syntax, &values, expected);
 }
 
 fn assert_match<ID, E: Item>(syntax: &Syntax<ID, E>, values: &[E], expected: Result<E, MatchResult>) {
-  let result =
-    if let Syntax { primary: Primary::Term(matcher), .. } = syntax { matcher.matches(values) } else { panic!() };
+  let result = if let Syntax { primary: Primary::Term(_, matcher), .. } = syntax { matcher(values) } else { panic!() };
   assert_eq!(expected, result);
 }

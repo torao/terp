@@ -1,6 +1,6 @@
 use crate::schema::chars::{ascii_alphabetic, ascii_digit};
 use crate::schema::MatchResult;
-use crate::schema::{FnMatcher, Item, Matcher, Primary, Schema, Syntax};
+use crate::schema::{Item, Primary, Schema, Syntax};
 use crate::{patterned_single_item, Result};
 
 #[test]
@@ -105,10 +105,10 @@ fn syntax_display() {
 fn patterned_single_item() {
   let s: Syntax<String, char> = patterned_single_item!(FOO, '0'..='9' | 'a'..='f' | 'A'..='F');
   match s {
-    Syntax { primary: Primary::Term(matcher), .. } => {
-      assert!(matches!(matcher.matches(&[]), Ok(MatchResult::UnmatchAndCanAcceptMore)));
+    Syntax { primary: Primary::Term(_, matcher), .. } => {
+      assert!(matches!(matcher(&[]), Ok(MatchResult::UnmatchAndCanAcceptMore)));
       for ch in '\0'..='\x7F' {
-        match (ch.is_ascii_hexdigit(), matcher.matches(&[ch])) {
+        match (ch.is_ascii_hexdigit(), matcher(&[ch])) {
           (true, Ok(MatchResult::Match(1))) => (),
           (false, Ok(MatchResult::Unmatch)) => (),
           _ => panic!(),
@@ -158,29 +158,6 @@ fn match_result() {
   assert!(!MatchResult::Unmatch.is_match());
   assert!(MatchResult::MatchAndCanAcceptMore(0).is_match());
   assert!(!MatchResult::UnmatchAndCanAcceptMore.is_match());
-}
-
-#[test]
-fn fn_matcher() {
-  fn digit(values: &[char]) -> Result<char, MatchResult> {
-    if values.is_empty() {
-      Ok(MatchResult::UnmatchAndCanAcceptMore)
-    } else if values[0].is_ascii_digit() {
-      Ok(MatchResult::Match(1))
-    } else {
-      Ok(MatchResult::Unmatch)
-    }
-  }
-
-  let matcher = FnMatcher::new("digit", digit);
-  assert!(matches!(matcher.matches(&[]), Ok(MatchResult::UnmatchAndCanAcceptMore)));
-  assert!(matches!(matcher.matches(&['0']), Ok(MatchResult::Match(1))));
-  assert!(matches!(matcher.matches(&['🛫']), Ok(MatchResult::Unmatch)));
-  assert!(matches!(matcher.matches(&['0', 'A']), Ok(MatchResult::Match(1))));
-  assert!(matches!(matcher.matches(&['🛫', '1']), Ok(MatchResult::Unmatch)));
-
-  assert_eq!("digit", matcher.to_string());
-  let _ = format!("{:?}", matcher);
 }
 
 #[test]

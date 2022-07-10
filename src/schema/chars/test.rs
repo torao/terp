@@ -1,5 +1,6 @@
 use crate::schema::chars::Location;
-use crate::schema::{Item, Location as L, MatchResult, Matcher, Primary, Syntax};
+use crate::schema::{Item, Location as L, MatchResult, Primary, Syntax};
+use crate::Result;
 
 #[test]
 fn char_location() {
@@ -56,19 +57,19 @@ fn test_all(syntax: Syntax<String, char>, label: &str, t0: char, t1: char, pred:
   assert_eq!(label, syntax.to_string());
   let _ = format!("{:?}", syntax);
   let matcher = get_matcher(syntax);
-  assert!(matches!(matcher.matches(&[]), Ok(MatchResult::UnmatchAndCanAcceptMore)));
+  assert!(matches!(matcher(&[]), Ok(MatchResult::UnmatchAndCanAcceptMore)));
   for ch in t0..=t1 {
-    match (pred(ch), matcher.matches(&[ch])) {
+    match (pred(ch), matcher(&[ch])) {
       (true, Ok(MatchResult::Match(1))) => (),
       (false, Ok(MatchResult::Unmatch)) => (),
-      _ => panic!("{} => {:?}", pred(ch), matcher.matches(&[ch])),
+      _ => panic!("{} => {:?}", pred(ch), matcher(&[ch])),
     }
   }
 }
 
-fn get_matcher<ID, E: Item>(s: Syntax<ID, E>) -> Box<dyn Matcher<E>> {
+fn get_matcher<ID, E: Item>(s: Syntax<ID, E>) -> Box<dyn Fn(&[E]) -> Result<E, MatchResult>> {
   match s {
-    Syntax { primary: Primary::Term(matcher), .. } => matcher,
+    Syntax { primary: Primary::Term(_, matcher), .. } => matcher,
     _ => panic!(),
   }
 }

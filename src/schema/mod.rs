@@ -51,7 +51,7 @@ impl<ID: Ord, E: 'static + Item> Schema<ID, E> {
     syntax.id = self.syntax_id_seq;
     self.syntax_id_seq += 1;
     match &mut syntax.primary {
-      Primary::Term(_) => (),
+      Primary::Term(..) => (),
       Primary::Alias(_) => (),
       Primary::Seq(branches) => {
         for branch in branches {
@@ -142,9 +142,10 @@ impl<ID, E: 'static + Item> Syntax<ID, E> {
     Syntax::with_primary(Primary::Alias(id))
   }
 
-  pub fn from_matcher(label: &str, f: fn(&[E]) -> Result<E, MatchResult>) -> Self {
-    Syntax::with_primary(Primary::Term(Box::new(FnMatcher::new(label, f))))
+  pub fn from_fn<FN: Fn(&[E]) -> Result<E, MatchResult> + 'static>(label: &str, f: FN) -> Self {
+    Syntax::with_primary(Primary::Term(label.to_string(), Box::new(f)))
   }
+
   pub fn repetition(&self) -> &RangeInclusive<usize> {
     &self.repetition
   }
@@ -239,7 +240,7 @@ impl<ID: Display + Debug, E: Item> Display for Syntax<ID, E> {
     let show_reps = min != 1 || max != 1;
     let show_parenth = show_reps
       && match &self.primary {
-        Primary::Term(_) => false,
+        Primary::Term(..) => false,
         Primary::Alias(_) => false,
         Primary::Seq(seq) => seq.len() > 1,
         Primary::Or(seq) => seq.len() > 1,
@@ -321,7 +322,7 @@ pub(crate) const OP_CONCAT: &str = ",";
 pub(crate) const OP_CHOICE: &str = " |";
 
 pub(crate) enum Primary<ID, E: Item> {
-  Term(Box<dyn Matcher<E>>),
+  Term(String, Box<dyn Fn(&[E]) -> Result<E, MatchResult>>),
   Alias(ID),
   Seq(Vec<Syntax<ID, E>>),
   Or(Vec<Syntax<ID, E>>),
@@ -330,7 +331,7 @@ pub(crate) enum Primary<ID, E: Item> {
 impl<ID: Display + Debug, E: Item> Display for Primary<ID, E> {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-      Primary::Term(parser) => Display::fmt(parser, f),
+      Primary::Term(name, ..) => Display::fmt(name, f),
       Primary::Alias(id) => Display::fmt(id, f),
       Primary::Seq(terms) => display(f, terms, OP_CONCAT),
       Primary::Or(terms) => display(f, terms, OP_CHOICE),
@@ -353,7 +354,7 @@ where
 impl<ID: Debug, E: Item> Debug for Primary<ID, E> {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-      Self::Term(matcher) => f.debug_tuple("Term").field(matcher).finish(),
+      Self::Term(name, ..) => f.debug_tuple("Term").field(name).finish(),
       Self::Alias(id) => f.debug_tuple("Alias").field(id).finish(),
       Self::Seq(seq) => f.debug_tuple("Seq").field(seq).finish(),
       Self::Or(branches) => f.debug_tuple("Or").field(branches).finish(),
@@ -374,35 +375,5 @@ pub enum MatchResult {
 impl MatchResult {
   pub fn is_match(&self) -> bool {
     matches!(self, MatchResult::Match(_) | MatchResult::MatchAndCanAcceptMore(_))
-  }
-}
-
-pub trait Matcher<E: Item>: Display + Debug + Send + Sync {
-  fn matches(&self, values: &[E]) -> Result<E, MatchResult>;
-}
-
-struct FnMatcher<E: Item>(String, fn(&[E]) -> Result<E, MatchResult>);
-
-impl<E: Item> FnMatcher<E> {
-  pub fn new(name: &str, f: fn(&[E]) -> Result<E, MatchResult>) -> FnMatcher<E> {
-    FnMatcher(name.to_string(), f)
-  }
-}
-
-impl<E: Item> Matcher<E> for FnMatcher<E> {
-  fn matches(&self, values: &[E]) -> Result<E, MatchResult> {
-    (self.1)(values)
-  }
-}
-
-impl<E: Item> Display for FnMatcher<E> {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "{}", self.0)
-  }
-}
-
-impl<E: Item> Debug for FnMatcher<E> {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    f.debug_tuple("FnMatcher").field(&self.0).finish()
   }
 }
