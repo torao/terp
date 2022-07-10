@@ -1,17 +1,21 @@
 use crate::parser::{Event, EventKind};
 use crate::schema::{Item, Location, MatchResult, Primary, Schema, Syntax};
 use crate::{Error, Result};
-use std::fmt::{Debug, Display};
+use std::fmt::{Debug, Display, Write};
 use std::hash::Hash;
 
 #[derive(Clone, Debug)]
 pub struct Path<'s, ID, E: Item>
 where
-  ID: Clone + Display + Debug,
+  ID: Clone + Display + Debug + PartialEq,
 {
   schema: &'s Schema<ID, E>,
   event_buffer: Vec<Event<ID, E>>,
   stack: Vec<StackFrame<'s, ID, E>>,
+
+  // For variable watch during step execution.
+  #[cfg(test)]
+  _debug: String,
 }
 
 impl<'s, ID, E: Item> Path<'s, ID, E>
@@ -22,7 +26,13 @@ where
     let event_buffer = Vec::with_capacity(16);
     let stack = Vec::with_capacity(16);
 
-    let mut path = Self { schema, event_buffer, stack };
+    let mut path = Self {
+      schema,
+      event_buffer,
+      stack,
+      #[cfg(test)]
+      _debug: String::from(""),
+    };
     path.stack_push_alias(id)?;
     Ok(path)
   }
@@ -44,10 +54,10 @@ where
   pub fn move_to_next(&mut self, buffer: &[E], mut matched: bool, eof: bool) -> (bool, bool) {
     for i in 0..self.stack.len() {
       let stack_position = self.stack.len() - i - 1;
-      let StackFrame { state, current, parent } = &mut self.stack[stack_position];
+      let StackFrame { state, current, parent, _debug } = &mut self.stack[stack_position];
       debug_assert!(state.appearances <= *state.syntax().repetition.end());
 
-      if matched {
+      if matched && state.appearances < *state.syntax().repetition.end() {
         state.appearances += 1;
       }
 
@@ -58,9 +68,10 @@ where
             println!("~ repeated: {} / {}", state.syntax(), state.appearances);
             state.proceed_along_buffer(buffer);
             self.stack_pop(i);
+            self.complete_eval_of_current_position(false);
             return (true, false);
           }
-          debug_assert!(state.appearances == *state.syntax().repetition.end());
+          debug_assert_eq!(state.appearances, *state.syntax().repetition.end());
           true
         }
         (false, _) => state.appearances >= *state.syntax.repetition.start(),
@@ -69,11 +80,8 @@ where
       if matched {
         state.proceed_along_buffer(buffer);
         if *current + 1 < parent.len() {
-          println!("~ moved: {} -> {}", parent[*current], parent[*current + 1]);
-          state.appearances = 0;
-          state.syntax = &parent[*current + 1];
-          *current += 1;
           self.stack_pop(i);
+          self.complete_eval_of_current_position(true);
           return (true, false);
         }
       }
@@ -87,6 +95,35 @@ where
     self.stack_pop(self.stack.len() - 1);
     debug_assert!(self.stack.len() == 1);
     debug_assert!(self.stack[0].current + 1 == self.stack[0].parent.len());
+
+    self.complete_eval_of_current_position(false);
+    debug_assert!(self.stack[0].current + 1 == self.stack[0].parent.len());
+  }
+
+  pub fn can_merge(&self, other: &Path<'s, ID, E>) -> bool {
+    // points the same syntax
+    debug_assert_eq!(self.stack[0].parent.len(), other.stack[0].parent.len()); // their root must be same
+    if self.stack.len() != other.stack.len() {
+      return false;
+    }
+    for i in (0..self.stack.len()).rev() {
+      if self.stack[i].state.syntax().id != other.stack[i].state.syntax().id {
+        return false;
+      }
+    }
+
+    // holds the same events
+    debug_assert_eq!(Event::normalize(self.event_buffer.clone()), self.event_buffer);
+    if self.event_buffer.len() != other.event_buffer.len() {
+      return false;
+    }
+    for i in (0..self.event_buffer.len()).rev() {
+      if self.event_buffer[i] != other.event_buffer[i] {
+        return false;
+      }
+    }
+
+    true
   }
 
   pub fn stack_push_alias(&mut self, id: &ID) -> Result<E, ()> {
@@ -102,20 +139,49 @@ where
       sf.state.match_begin = self.current().match_begin;
     }
     self.stack.push(sf);
+    #[cfg(test)]
+    {
+      self._debug = self.to_string();
+    }
   }
 
   fn stack_pop(&mut self, count: usize) {
     for _ in 0..count {
-      let StackFrame { state, parent, current } = self.stack.pop().unwrap();
-      debug_assert!(current + 1 == parent.len());
-      if let Syntax { primary: Primary::Alias(id), .. } = self.current().syntax() {
-        println!("~ ended: {}", id);
-        self.events_push(state.event(EventKind::End(id.clone())));
-      }
+      // The current of stack frame to be discarding may not point to the end of the stack frame if it was interpreted
+      // by unmatch but matched at the upper layer.
+      // let StackFrame { state, parent, current } = self.stack.pop().unwrap();
+      // debug_assert!(current + 1 == parent.len());
+      self.complete_eval_of_current_position(false);
+
+      let StackFrame { state, .. } = self.stack.pop().unwrap();
       self.current_mut().match_begin = state.match_begin;
       self.current_mut().location = state.location;
     }
+    #[cfg(test)]
+    {
+      self._debug = self.to_string();
+    }
     return;
+  }
+
+  fn complete_eval_of_current_position(&mut self, move_next: bool) {
+    let StackFrame { state, current, parent, _debug } = self.stack.last_mut().unwrap();
+    let event = if let Primary::Alias(id) = &parent[*current].primary {
+      println!("~ ended: {}", id);
+      Some(state.event(EventKind::End(id.clone())))
+    } else {
+      None
+    };
+
+    if move_next {
+      println!("~ moved: {} -> {}", parent[*current], parent[*current + 1]);
+      *current += 1;
+      state.syntax = &parent[*current];
+      state.appearances = 0;
+    }
+    if let Some(e) = event {
+      self.events_push(e);
+    }
   }
 
   pub fn events_push(&mut self, e: Event<ID, E>) {
@@ -149,6 +215,23 @@ where
   }
 }
 
+impl<'s, ID, E: Item> Display for Path<'s, ID, E>
+where
+  ID: Clone + Hash + Ord + Display + Debug,
+{
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    for (i, StackFrame { parent, current, .. }) in self.stack.iter().enumerate() {
+      if i != 0 {
+        f.write_str(">>")?;
+      }
+      f.write_char('[')?;
+      Display::fmt(&parent[*current], f)?;
+      f.write_char(']')?;
+    }
+    Ok(())
+  }
+}
+
 #[derive(Clone, Debug)]
 struct StackFrame<'s, ID, E: Item>
 where
@@ -157,6 +240,8 @@ where
   state: State<'s, ID, E>,
   parent: &'s Vec<Syntax<ID, E>>,
   current: usize,
+
+  _debug: String,
 }
 
 impl<'s, ID, E: Item> StackFrame<'s, ID, E>
@@ -166,7 +251,7 @@ where
   pub fn new(parent: &'s Vec<Syntax<ID, E>>) -> Self {
     debug_assert!(!parent.is_empty());
     let state = State::new(&parent[0]);
-    Self { state, parent, current: 0 }
+    Self { state, parent, current: 0, _debug: format!("{}", parent[0]) }
   }
 }
 
@@ -188,7 +273,7 @@ where
 
 impl<'s, ID, E: 'static + Item> State<'s, ID, E>
 where
-  ID: Clone + Display + Debug,
+  ID: Clone + Display + Debug + PartialEq,
 {
   pub fn new(syntax: &'s Syntax<ID, E>) -> Self {
     Self { location: E::Location::default(), match_begin: 0, match_length: 0, appearances: 0, syntax }
@@ -266,7 +351,7 @@ where
 
 pub enum Matching<ID, E: Item>
 where
-  ID: Clone + Display + Debug,
+  ID: Clone + Display + Debug + PartialEq,
 {
   Match(usize, Option<Event<ID, E>>),
   More,

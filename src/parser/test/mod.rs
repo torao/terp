@@ -1,10 +1,12 @@
 use crate::parser::{Context, Event, EventKind};
-use crate::schema::chars::{self, ascii_alphabetic, ascii_digit, token};
+use crate::schema::chars::{self, ascii_alphabetic, ascii_digit, one_of_tokens, token};
 use crate::schema::{Item, Location, Schema, Syntax};
 use crate::{Error, Result};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 
+mod json;
+mod or;
 mod zero_repetition;
 
 #[test]
@@ -16,6 +18,19 @@ fn event() {
     let event = Event { location, kind };
     assert_eq!(event, event.clone());
     let _ = format!("{:?}", event);
+  }
+}
+
+#[test]
+fn context_definition_not_found() {
+  let schema = Schema::<&str, char>::new("Foo");
+
+  let mut events = Vec::new();
+  let handler = |e: Event<_, _>| events.push(e);
+  match Context::new(&schema, "A", handler) {
+    Err(Error::UndefinedID(a)) => assert_eq!("A", a),
+    Ok(_) => unreachable!(),
+    Err(unexpected) => unreachable!("{}", unexpected),
   }
 }
 
@@ -245,6 +260,45 @@ fn context_seq_keywords() {
     let mut parser = Context::new(&schema, "A", handler).unwrap();
     let expecteds = keywords.iter().map(|kwd| format!("[{}]", kwd)).collect::<Vec<_>>();
     assert_multiple_unmatches(parser.push('X'), location(0, 0, 0), &expecteds, "['X']");
+
+    let mut events = Vec::new();
+    let handler = |e: Event<_, _>| events.push(e);
+    let mut parser = Context::new(&schema, "A", handler).unwrap();
+    parser.push_str(kwd).unwrap();
+    assert!(matches!(parser.push('X'), Err(Error::<char>::Unmatched { .. }))); // various errors
+  }
+}
+
+#[test]
+fn context_one_of_tokens() {
+  let keywords = [
+    "Self", "abstract", "as", "async", "await", "become", "box", "break", "const", "continue", "crate", "do", "dyn",
+    "else", "enum", "extern", "false", "final", "fn", "for", "if", "impl", "in", "let", "loop", "macro", "match",
+    "mod", "move", "mut", "override", "priv", "pub", "ref", "return", "self", "static", "struct", "super", "trait",
+    "true", "try", "type", "typeof", "union", "unsafe", "unsized", "use", "virtual", "where", "while", "yield",
+  ];
+
+  let a = one_of_tokens(&keywords);
+  let schema = Schema::new("Foo").define("A", a);
+  for kwd in &keywords {
+    let mut events = Vec::new();
+    let handler = |e: Event<_, _>| events.push(e);
+    let mut parser = Context::new(&schema, "A", handler).unwrap();
+    parser.push_str(kwd).unwrap();
+    parser.finish().unwrap();
+    Events::new().begin("A").fragments(kwd).end().assert_eq(&events);
+
+    let mut events = Vec::new();
+    let handler = |e: Event<_, _>| events.push(e);
+    let parser = Context::new(&schema, "A", handler).unwrap();
+    let expected = format!("[{}]", keywords.to_vec().join("|"));
+    assert_unmatch(parser.finish(), location(0, 0, 0), &expected, "[EOF]");
+
+    let mut events = Vec::new();
+    let handler = |e: Event<_, _>| events.push(e);
+    let mut parser = Context::new(&schema, "A", handler).unwrap();
+    let expected = format!("[{}]", keywords.to_vec().join("|"));
+    assert_unmatch(parser.push('X'), location(0, 0, 0), &expected, "['X']");
 
     let mut events = Vec::new();
     let handler = |e: Event<_, _>| events.push(e);

@@ -1,15 +1,24 @@
-use crate::schema::{patterned_single_item, MatchResult, Syntax};
+use crate::schema::{one_of_seqs, patterned_single_item, seq, single, MatchResult, Syntax};
 use crate::Result;
 use std::fmt::{Debug, Display};
-
-use super::seq;
 
 #[cfg(test)]
 mod test;
 
 #[inline]
+pub fn ch<ID>(ch: char) -> Syntax<ID, char> {
+  single(ch)
+}
+
+#[inline]
 pub fn token<ID>(token: &str) -> Syntax<ID, char> {
   seq(&token.chars().collect::<Vec<_>>())
+}
+
+#[inline]
+pub fn one_of_tokens<ID>(tokens: &[&str]) -> Syntax<ID, char> {
+  let tokens = tokens.iter().map(|i| i.chars().collect::<Vec<_>>()).collect::<Vec<_>>();
+  one_of_seqs(&tokens)
 }
 
 #[derive(Default, Copy, Clone, Debug, PartialEq, Eq)]

@@ -7,18 +7,22 @@ use std::ops::{BitAnd, BitOr, Mul, RangeInclusive};
 pub mod bytes;
 pub mod chars;
 
+mod matcher;
+pub use matcher::*;
+
 #[cfg(test)]
 mod test;
 
 pub struct Schema<ID, E: Item> {
   name: String,
+  syntax_id_seq: usize,
   /// The top-level [`Syntax`] stored with the `ID` must be [`Primary::Seq`].
   defs: BTreeMap<ID, Syntax<ID, E>>,
 }
 
 impl<ID, E: 'static + Item> Schema<ID, E> {
   pub fn new(name: &str) -> Self {
-    Self { name: name.to_string(), defs: BTreeMap::default() }
+    Self { name: name.to_string(), syntax_id_seq: 1, defs: BTreeMap::default() }
   }
 
   pub fn name(&self) -> &str {
@@ -32,14 +36,34 @@ impl<ID, E: 'static + Item> Schema<ID, E> {
 
 impl<ID: Ord, E: 'static + Item> Schema<ID, E> {
   pub fn define(mut self, id: ID, syntax: Syntax<ID, E>) -> Self {
-    // the specified Syntax is wrapped in Primary::Seq and stored if it's not a Primary::Seq
-    let syntax = syntax.conv_to_non_repeating_seq();
+    // the specified Syntax is wrapped in Primary::Seq if it's not a Primary::Seq
+    let mut syntax = syntax.conv_to_non_repeating_seq();
+    self.init_syntax_ids(&mut syntax);
     self.defs.insert(id, syntax);
     self
   }
 
   pub fn get(&self, id: &ID) -> Option<&Syntax<ID, E>> {
     self.defs.get(id)
+  }
+
+  fn init_syntax_ids(&mut self, syntax: &mut Syntax<ID, E>) {
+    syntax.id = self.syntax_id_seq;
+    self.syntax_id_seq += 1;
+    match &mut syntax.primary {
+      Primary::Term(_) => (),
+      Primary::Alias(_) => (),
+      Primary::Seq(branches) => {
+        for branch in branches {
+          self.init_syntax_ids(branch);
+        }
+      }
+      Primary::Or(branches) => {
+        for branch in branches {
+          self.init_syntax_ids(branch);
+        }
+      }
+    }
   }
 }
 
@@ -88,7 +112,7 @@ impl Item for u8 {
   }
 }
 
-pub trait Location<E: Item>: Default + Copy + Display + Debug {
+pub trait Location<E: Item>: Default + Copy + Display + Debug + PartialEq {
   fn position(&self) -> u64;
 
   fn increment_with(&mut self, item: E);
@@ -103,6 +127,7 @@ pub trait Location<E: Item>: Default + Copy + Display + Debug {
 // ---------------------------------
 
 pub struct Syntax<ID, E: Item> {
+  pub id: usize,
   pub location: Option<E::Location>,
   pub(crate) repetition: RangeInclusive<usize>,
   pub(crate) primary: Primary<ID, E>,
@@ -110,7 +135,7 @@ pub struct Syntax<ID, E: Item> {
 
 impl<ID, E: 'static + Item> Syntax<ID, E> {
   fn with_primary(primary: Primary<ID, E>) -> Self {
-    Self { location: None, primary, repetition: 1..=1 }
+    Self { id: 0, location: None, primary, repetition: 1..=1 }
   }
 
   pub fn from_id(id: ID) -> Self {
@@ -125,64 +150,70 @@ impl<ID, E: 'static + Item> Syntax<ID, E> {
   }
 
   pub fn and(self, rhs: Syntax<ID, E>) -> Self {
-    let Syntax { primary: l_arm, repetition: l_range, location: l_location } = self;
-    let Syntax { primary: r_arm, repetition: r_range, location: r_location } = rhs;
+    let Syntax { id: l_id, primary: l_arm, repetition: l_range, location: l_location } = self;
+    let Syntax { id: r_id, primary: r_arm, repetition: r_range, location: r_location } = rhs;
+    debug_assert!(l_id == 0 && r_id == 0);
     match (l_arm, r_arm) {
       (Primary::Seq(mut lhs), Primary::Seq(mut rhs)) if l_range == r_range => {
         lhs.append(&mut rhs);
         let arm = Primary::Seq(lhs);
-        Syntax { location: l_location, primary: arm, repetition: l_range }
+        Syntax { id: 0, location: l_location, primary: arm, repetition: l_range }
       }
       (Primary::Seq(mut lhs), rhs) if l_range == r_range => {
-        lhs.push(Syntax { primary: rhs, repetition: r_range, location: r_location });
+        lhs.push(Syntax { id: 0, primary: rhs, repetition: r_range, location: r_location });
         let arm = Primary::Seq(lhs);
-        Syntax { location: l_location, primary: arm, repetition: l_range }
+        Syntax { id: 0, location: l_location, primary: arm, repetition: l_range }
       }
       (lhs, Primary::Seq(mut rhs)) if l_range == r_range => {
-        rhs.insert(0, Syntax { primary: lhs, repetition: r_range, location: r_location });
+        rhs.insert(0, Syntax { id: 0, primary: lhs, repetition: r_range, location: r_location });
         let arm = Primary::Seq(rhs);
-        Syntax { location: l_location, primary: arm, repetition: l_range }
+        Syntax { id: 0, location: l_location, primary: arm, repetition: l_range }
       }
       (lhs, rhs) => {
-        let lhs = Syntax { primary: lhs, repetition: l_range, location: l_location };
-        let rhs = Syntax { primary: rhs, repetition: r_range, location: r_location };
-        Syntax { location: l_location, primary: Primary::Seq(vec![lhs, rhs]), repetition: 1..=1 }
+        let lhs = Syntax { id: 0, primary: lhs, repetition: l_range, location: l_location };
+        let rhs = Syntax { id: 0, primary: rhs, repetition: r_range, location: r_location };
+        Syntax { id: 0, location: l_location, primary: Primary::Seq(vec![lhs, rhs]), repetition: 1..=1 }
       }
     }
   }
 
   pub fn or(self, rhs: Syntax<ID, E>) -> Self {
-    let Syntax { primary: l_arm, repetition: l_range, location: l_location } = self;
-    let Syntax { primary: r_arm, repetition: r_range, location: r_location } = rhs;
+    let Syntax { id: l_id, primary: l_arm, repetition: l_range, location: l_location } = self;
+    let Syntax { id: r_id, primary: r_arm, repetition: r_range, location: r_location } = rhs;
+    debug_assert!(l_id == 0 && r_id == 0);
     match (l_arm, r_arm) {
       (Primary::Or(mut lhs), Primary::Or(mut rhs)) if l_range == r_range => {
         lhs.append(&mut rhs);
         let arm = Primary::Or(lhs);
-        Syntax { primary: arm, repetition: l_range, location: l_location }
+        Syntax { id: 0, primary: arm, repetition: l_range, location: l_location }
       }
       (Primary::Or(mut lhs), rhs) if l_range == r_range => {
-        lhs.push(Syntax { primary: rhs, repetition: r_range, location: r_location }.conv_to_non_repeating_seq());
+        lhs.push(Syntax { id: 0, primary: rhs, repetition: r_range, location: r_location }.conv_to_non_repeating_seq());
         let arm = Primary::Or(lhs);
-        Syntax { primary: arm, repetition: l_range, location: l_location }
+        Syntax { id: 0, primary: arm, repetition: l_range, location: l_location }
       }
       (lhs, Primary::Or(mut rhs)) if l_range == r_range => {
-        rhs.insert(0, Syntax { primary: lhs, repetition: r_range, location: r_location }.conv_to_non_repeating_seq());
+        rhs.insert(
+          0,
+          Syntax { id: 0, primary: lhs, repetition: r_range, location: r_location }.conv_to_non_repeating_seq(),
+        );
         let arm = Primary::Or(rhs);
-        Syntax { primary: arm, repetition: l_range, location: l_location }
+        Syntax { id: 0, primary: arm, repetition: l_range, location: l_location }
       }
       (lhs, rhs) => {
-        let lhs = Syntax { primary: lhs, repetition: l_range, location: l_location }.conv_to_non_repeating_seq();
-        let rhs = Syntax { primary: rhs, repetition: r_range, location: r_location }.conv_to_non_repeating_seq();
-        Syntax { primary: Primary::Or(vec![lhs, rhs]), repetition: 1..=1, location: l_location }
+        let lhs = Syntax { id: 0, primary: lhs, repetition: l_range, location: l_location }.conv_to_non_repeating_seq();
+        let rhs = Syntax { id: 0, primary: rhs, repetition: r_range, location: r_location }.conv_to_non_repeating_seq();
+        Syntax { id: 0, primary: Primary::Or(vec![lhs, rhs]), repetition: 1..=1, location: l_location }
       }
     }
   }
 
   pub fn reps(self, reps: RangeInclusive<usize>) -> Self {
-    let Syntax { primary, repetition: range, location } = self;
+    let Syntax { id, primary, repetition: range, location } = self;
+    debug_assert_eq!(0, id);
     let min = *range.start() * reps.start();
     let max = *range.end() * reps.end();
-    Syntax { primary, repetition: RangeInclusive::new(min, max), location }
+    Syntax { id: 0, primary, repetition: RangeInclusive::new(min, max), location }
   }
 
   fn conv_to_non_repeating_seq(self) -> Self {
@@ -190,7 +221,7 @@ impl<ID, E: 'static + Item> Syntax<ID, E> {
       self
     } else {
       let location = self.location;
-      Syntax { repetition: 1..=1, primary: Primary::Seq(vec![self]), location }
+      Syntax { id: 0, repetition: 1..=1, primary: Primary::Seq(vec![self]), location }
     }
   }
 }
@@ -221,8 +252,14 @@ impl<ID: Display + Debug, E: Item> Display for Syntax<ID, E> {
     if show_reps {
       if min == 0 && max == 1 {
         write!(f, "?")
+      } else if min == 0 && max == usize::MAX {
+        write!(f, "*")
+      } else if min == 1 && max == usize::MAX {
+        write!(f, "+")
       } else if min == max {
         write!(f, "{{{}}}", min)
+      } else if max == usize::MAX {
+        write!(f, "{{{},}}", min)
       } else {
         write!(f, "{{{},{}}}", min, max)
       }
@@ -326,7 +363,7 @@ impl<ID: Debug, E: Item> Debug for Primary<ID, E> {
 
 // ---------------------------------
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MatchResult {
   Match(usize),
   Unmatch,
@@ -368,54 +405,4 @@ impl<E: Item> Debug for FnMatcher<E> {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     f.debug_tuple("FnMatcher").field(&self.0).finish()
   }
-}
-
-// ---------------------------------
-
-#[macro_export]
-macro_rules! patterned_single_item {
-  ($name:ident, $p:pat) => {
-    patterned_single_item!(char, $name, $p)
-  };
-  ($t:tt, $name:ident, $p:pat) => {{
-    fn _single_pattern<E: $crate::schema::Item>(values: &[$t]) -> Result<E, MatchResult> {
-      Ok(if values.is_empty() {
-        MatchResult::UnmatchAndCanAcceptMore
-      } else {
-        if matches!(values[0], $p) {
-          MatchResult::Match(1)
-        } else {
-          MatchResult::Unmatch
-        }
-      })
-    }
-    Syntax::from_matcher(stringify!($name), _single_pattern)
-  }};
-}
-
-pub use patterned_single_item;
-
-pub fn seq<ID, E: Item>(items: &[E]) -> Syntax<ID, E> {
-  #[derive(Debug)]
-  struct SeqMatcher<E: Item> {
-    items: Vec<E>,
-  }
-  impl<E: Item> Matcher<E> for SeqMatcher<E> {
-    fn matches(&self, values: &[E]) -> Result<E, MatchResult> {
-      let min = std::cmp::min(self.items.len(), values.len());
-      for (i, value) in values.iter().take(min).enumerate() {
-        if *value != self.items[i] {
-          return Ok(MatchResult::Unmatch);
-        }
-      }
-      Ok(if min < self.items.len() { MatchResult::UnmatchAndCanAcceptMore } else { MatchResult::Match(min) })
-    }
-  }
-  impl<E: Item> Display for SeqMatcher<E> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-      f.write_str(&E::debug_symbols(&self.items))
-    }
-  }
-  let items = items.to_vec();
-  Syntax::with_primary(Primary::Term(Box::new(SeqMatcher { items })))
 }

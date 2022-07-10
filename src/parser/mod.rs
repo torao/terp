@@ -6,51 +6,11 @@ use std::hash::Hash;
 mod path;
 pub(crate) use path::*;
 
+mod event;
+pub use event::*;
+
 #[cfg(test)]
 mod test;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Event<ID, E: Item>
-where
-  ID: Clone + Display + Debug,
-{
-  pub location: E::Location,
-  pub kind: EventKind<ID, E>,
-}
-
-impl<ID, E: Item> Event<ID, E>
-where
-  ID: Clone + Display + Debug,
-{
-  pub fn append(events: &mut Vec<Event<ID, E>>, mut e: Event<ID, E>) {
-    if let (Event { kind: EventKind::Fragments(items), .. }, Some(Event { kind: EventKind::Fragments(current), .. })) =
-      (&mut e, events.last_mut())
-    {
-      current.append(items);
-    } else {
-      events.push(e);
-    }
-  }
-
-  pub fn normalize(mut events: Vec<Event<ID, E>>) -> Vec<Event<ID, E>> {
-    let mut norm = Vec::with_capacity(events.len());
-    for e in events.drain(..) {
-      Self::append(&mut norm, e);
-    }
-    norm.shrink_to_fit();
-    norm
-  }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum EventKind<ID, E: Item>
-where
-  ID: Clone + Debug,
-{
-  Begin(ID),
-  End(ID),
-  Fragments(Vec<E>),
-}
 
 pub struct Context<'s, ID, E: Item, H: FnMut(Event<ID, E>)>
 where
@@ -89,8 +49,8 @@ where
 
   pub fn push(&mut self, item: E) -> Result<E, ()> {
     println!("PUSH: {:?}, buf_size={}", item, self.buffer.len());
-    for (i, state) in self.ongoing.iter().enumerate() {
-      println!("  ONGOING[{}]: {}", i, state.current().syntax())
+    for (i, path) in self.ongoing.iter().enumerate() {
+      println!("  ONGOING[{}]: {}", i, path)
     }
 
     self.check_error(false, Some(item))?;
@@ -151,24 +111,24 @@ where
   fn move_ongoing_paths_to_next_term(path: Path<'s, ID, E>) -> Result<E, Vec<Path<'s, ID, E>>> {
     let mut ongoing = vec![path];
     let mut term_reached = Vec::with_capacity(ongoing.len());
-    while let Some(mut path) = ongoing.pop() {
-      match &path.current().syntax().primary {
+    while let Some(mut eval_path) = ongoing.pop() {
+      match &eval_path.current().syntax().primary {
         Primary::Term(..) => {
-          term_reached.push(path);
+          term_reached.push(eval_path);
         }
         Primary::Alias(id) => {
-          path.stack_push_alias(id)?;
-          path.events_push(path.current().event(EventKind::Begin(id.clone())));
-          ongoing.push(path);
+          eval_path.stack_push_alias(id)?;
+          eval_path.events_push(eval_path.current().event(EventKind::Begin(id.clone())));
+          ongoing.push(eval_path);
         }
         Primary::Seq(seq) => {
-          path.stack_push(seq);
-          ongoing.push(path);
+          eval_path.stack_push(seq);
+          ongoing.push(eval_path);
         }
         Primary::Or(branches) => {
           for branch in branches {
             if let Syntax { primary: Primary::Seq(seq), .. } = branch {
-              let mut next = path.clone();
+              let mut next = eval_path.clone();
               next.stack_push(seq);
               ongoing.push(next);
             } else {
@@ -192,6 +152,7 @@ where
 
     while let Some(mut path) = ongoing.pop() {
       debug_assert!(matches!(path.current().syntax().primary, Primary::Term(..)));
+      println!("~ === {}", path);
 
       let matched = match path.current_mut().matches(&self.buffer, eof)? {
         Matching::Match(_length, event) => {
@@ -219,17 +180,35 @@ where
         }
         (true, _) => {
           let uncapture_exists = path.current().match_begin + path.current().match_length < self.buffer.len();
+          let mut nexts = Self::move_ongoing_paths_to_next_term(path)?;
           if uncapture_exists {
-            ongoing.append(&mut Self::move_ongoing_paths_to_next_term(path)?);
+            ongoing.append(&mut nexts);
           } else {
-            self.ongoing.append(&mut Self::move_ongoing_paths_to_next_term(path)?);
+            self.ongoing.append(&mut nexts);
           }
         }
         (false, _) => self.prev_unmatched.push(path),
       }
     }
 
+    Self::merge_paths(&mut self.ongoing);
+    Self::merge_paths(&mut self.prev_completed);
+    Self::merge_paths(&mut self.prev_unmatched);
     Ok(())
+  }
+
+  fn merge_paths(paths: &mut Vec<Path<ID, E>>) {
+    for i in 0..paths.len() {
+      let mut j = i + 1;
+      while j < paths.len() {
+        if paths[i].can_merge(&paths[j]) {
+          println!("~ duplicated: [{},{}]{}", i, j, paths[j]);
+          paths.remove(j);
+        } else {
+          j += 1;
+        }
+      }
+    }
   }
 
   fn check_error(&self, eof: bool, item: Option<E>) -> Result<E, ()> {

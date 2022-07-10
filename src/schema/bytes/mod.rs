@@ -3,7 +3,7 @@ use std::fmt::Display;
 #[cfg(test)]
 mod test;
 
-#[derive(Default, Copy, Clone, Debug)]
+#[derive(Default, Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Location(pub u64);
 
 impl crate::schema::Location<u8> for Location {

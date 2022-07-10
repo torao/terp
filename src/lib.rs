@@ -3,9 +3,12 @@ use schema::Item;
 pub mod parser;
 pub mod schema;
 
+#[cfg(test)]
+mod test;
+
 pub type Result<E, T> = std::result::Result<T, Error<E>>;
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, PartialEq, Eq)]
 pub enum Error<E: Item> {
   #[error("{location} {expected} expected, but {actual} appeared")]
   Unmatched { location: E::Location, expected: String, actual: String },
@@ -13,21 +16,8 @@ pub enum Error<E: Item> {
   MultipleMatches { location: E::Location, expecteds: Vec<String>, actual: String },
   #[error("{0:?}")]
   Multi(Vec<Error<E>>),
-  #[error("unable to continue due to a previous error or already finished")]
-  UnableToContinue,
   #[error("{0}")]
   UndefinedID(String),
-
-  // InputSource
-  #[error("failed to decode character in {encoding}: {sequence:?} @ {position}")]
-  CharacterDecoding { encoding: &'static str, position: u64, sequence: Vec<u8> },
-  #[error("the marked position {0} is incorrect")]
-  OperationByIncorrectStreamMark(u64),
-  #[error("invalid seek to a negative or overflowing position")]
-  InvalidSeek(i64),
-
-  #[error(transparent)]
-  Io(#[from] std::io::Error),
 }
 
 impl<E: Item> Error<E> {

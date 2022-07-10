@@ -4,6 +4,23 @@ use crate::schema::chars::{ascii_alphabetic, ascii_digit};
 use crate::schema::Schema;
 
 #[test]
+fn context_zero_repetition_at_the_beginning() {
+  let a = (ascii_digit() * (0..=0)) & (ascii_alphabetic() * (0..=1));
+  let schema = Schema::new("Foo").define("A", a);
+
+  for digits in ["", "X"] {
+    let mut events = Vec::new();
+    let handler = |e: Event<_, _>| events.push(e);
+    let mut parser = Context::new(&schema, "A", handler).unwrap();
+    for ch in digits.chars() {
+      parser.push(ch).unwrap();
+    }
+    parser.finish().unwrap();
+    Events::new().begin("A").fragments(digits).end().assert_eq(&events);
+  }
+}
+
+#[test]
 fn context_zero_repetition_option() {
   let a = ascii_digit() * (0..=1);
   let schema = Schema::new("Foo").define("A", a);

@@ -83,6 +83,25 @@ fn syntax_repetition_for_sequence() {
 }
 
 #[test]
+fn syntax_display() {
+  for (reps, expected) in vec![
+    (0..=0, "{0}"),
+    (0..=1, "?"),
+    (0..=2, "{0,2}"),
+    (0..=usize::MAX, "*"),
+    (1..=1, ""),
+    (1..=2, "{1,2}"),
+    (1..=usize::MAX, "+"),
+    (2..=2, "{2}"),
+    (2..=3, "{2,3}"),
+    (2..=usize::MAX, "{2,}"),
+  ] {
+    let s = ascii_alphabetic::<String>() * reps;
+    assert_eq!(format!("ASCII_ALPHA{}", expected), s.to_string());
+  }
+}
+
+#[test]
 fn patterned_single_item() {
   let s: Syntax<String, char> = patterned_single_item!(FOO, '0'..='9' | 'a'..='f' | 'A'..='F');
   match s {
