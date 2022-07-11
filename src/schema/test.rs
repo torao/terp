@@ -1,7 +1,6 @@
 use crate::schema::chars::{ascii_alphabetic, ascii_digit};
 use crate::schema::MatchResult;
-use crate::schema::{Item, Primary, Schema, Syntax};
-use crate::{patterned_single_item, Result};
+use crate::schema::{Item, Schema, Syntax};
 
 #[test]
 fn create_new_schema() {
@@ -98,24 +97,6 @@ fn syntax_display() {
   ] {
     let s = ascii_alphabetic::<String>() * reps;
     assert_eq!(format!("ASCII_ALPHA{}", expected), s.to_string());
-  }
-}
-
-#[test]
-fn patterned_single_item() {
-  let s: Syntax<String, char> = patterned_single_item!(FOO, '0'..='9' | 'a'..='f' | 'A'..='F');
-  match s {
-    Syntax { primary: Primary::Term(_, matcher), .. } => {
-      assert!(matches!(matcher(&[]), Ok(MatchResult::UnmatchAndCanAcceptMore)));
-      for ch in '\0'..='\x7F' {
-        match (ch.is_ascii_hexdigit(), matcher(&[ch])) {
-          (true, Ok(MatchResult::Match(1))) => (),
-          (false, Ok(MatchResult::Unmatch)) => (),
-          _ => panic!(),
-        }
-      }
-    }
-    _ => panic!(),
   }
 }
 

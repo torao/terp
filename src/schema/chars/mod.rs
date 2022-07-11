@@ -1,5 +1,4 @@
-use crate::schema::{one_of_seqs, patterned_single_item, seq, single, MatchResult, Syntax};
-use crate::Result;
+use crate::schema::{any_of_ranges_with_label, one_of_seqs, range_with_label, seq, single, Syntax};
 use std::fmt::{Debug, Display};
 
 #[cfg(test)]
@@ -53,20 +52,20 @@ impl Display for Location {
 
 #[inline]
 pub fn ascii_digit<ID: Debug>() -> Syntax<ID, char> {
-  patterned_single_item!(ASCII_DIGIT, '0'..='9')
+  range_with_label("ASCII_DIGIT", '0'..='9')
 }
 
 #[inline]
 pub fn ascii_lower_alphabetic<ID>() -> Syntax<ID, char> {
-  patterned_single_item!(ASCII_LOWER, 'a'..='z')
+  range_with_label("ASCII_LOWER", 'a'..='z')
 }
 
 #[inline]
 pub fn ascii_upper_alphabetic<ID>() -> Syntax<ID, char> {
-  patterned_single_item!(ASCII_UPPER, 'A'..='Z')
+  range_with_label("ASCII_UPPER", 'A'..='Z')
 }
 
 #[inline]
 pub fn ascii_alphabetic<ID>() -> Syntax<ID, char> {
-  patterned_single_item!(ASCII_ALPHA, 'A'..='Z' | 'a'..='z')
+  any_of_ranges_with_label("ASCII_ALPHA", vec!['A'..='Z', 'a'..='z'])
 }

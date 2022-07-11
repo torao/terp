@@ -7,29 +7,6 @@ use std::ops::RangeInclusive;
 #[cfg(test)]
 mod test;
 
-#[macro_export]
-macro_rules! patterned_single_item {
-  ($name:ident, $p:pat) => {
-    patterned_single_item!(char, $name, $p)
-  };
-  ($t:tt, $name:ident, $p:pat) => {{
-    fn _single_pattern<E: $crate::schema::Item>(values: &[$t]) -> Result<E, MatchResult> {
-      Ok(if values.is_empty() {
-        MatchResult::UnmatchAndCanAcceptMore
-      } else {
-        if matches!(values[0], $p) {
-          MatchResult::Match(1)
-        } else {
-          MatchResult::Unmatch
-        }
-      })
-    }
-    Syntax::from_fn(stringify!($name), _single_pattern)
-  }};
-}
-
-pub use patterned_single_item;
-
 pub fn id<ID, E: Item>(id: ID) -> Syntax<ID, E> {
   Syntax::from_id(id)
 }
@@ -52,10 +29,18 @@ pub fn single<ID, E: Item>(item: E) -> Syntax<ID, E> {
 
 pub fn range<ID, E: Item + PartialOrd>(r: RangeInclusive<E>) -> Syntax<ID, E> {
   let label = format!("{{{},{}}}", E::debug_symbol(*r.start()), E::debug_symbol(*r.end()));
-  Syntax::from_fn(&label, move |values: &[E]| -> Result<E, MatchResult> {
+  range_with_label(&label, r)
+}
+
+pub fn range_with_label<ID, E: Item + PartialOrd>(label: &str, r: RangeInclusive<E>) -> Syntax<ID, E> {
+  any_of_ranges_with_label(label, vec![r])
+}
+
+pub fn any_of_ranges_with_label<ID, E: Item + PartialOrd>(label: &str, rs: Vec<RangeInclusive<E>>) -> Syntax<ID, E> {
+  Syntax::from_fn(label, move |values: &[E]| -> Result<E, MatchResult> {
     if values.is_empty() {
       Ok(MatchResult::UnmatchAndCanAcceptMore)
-    } else if r.contains(&values[0]) {
+    } else if rs.iter().any(|r| r.contains(&values[0])) {
       Ok(MatchResult::Match(1))
     } else {
       Ok(MatchResult::Unmatch)
