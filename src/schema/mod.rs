@@ -86,6 +86,11 @@ impl<ID: Debug, E: Item> Debug for Schema<ID, E> {
 pub trait Item: 'static + Copy + Clone + Send + Sync + PartialEq + Eq + Display + Debug {
   type Location: Location<Self>;
 
+  /// The number of items to be restored from the buffer for error messages. A maximum of 3 units and two three-point
+  /// leaders will be given. e.g., in case 8 for `char`, `...3456789012345678...34567890`
+  ///
+  const SAMPLING_UNIT_AT_ERROR: usize;
+
   fn debug_symbol(value: Self) -> String {
     let values = [value];
     Self::debug_symbols(&values)
@@ -95,6 +100,7 @@ pub trait Item: 'static + Copy + Clone + Send + Sync + PartialEq + Eq + Display 
 
 impl Item for char {
   type Location = chars::Location;
+  const SAMPLING_UNIT_AT_ERROR: usize = 8;
 
   fn debug_symbol(value: Self) -> String {
     format!("{:?}", value)
@@ -106,6 +112,7 @@ impl Item for char {
 
 impl Item for u8 {
   type Location = bytes::Location;
+  const SAMPLING_UNIT_AT_ERROR: usize = 8;
 
   fn debug_symbols(values: &[Self]) -> String {
     values.iter().map(|c| format!("{:02X}", c)).collect::<String>()

@@ -161,7 +161,6 @@ where
     {
       self._debug = self.to_string();
     }
-    return;
   }
 
   fn complete_eval_of_current_position(&mut self, move_next: bool) {

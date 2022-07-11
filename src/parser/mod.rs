@@ -96,8 +96,8 @@ where
         let mut expecteds = Vec::with_capacity(self.prev_completed.len());
         let mut repr_actual = String::new();
         for path in &self.prev_completed {
-          let (expected, actual) =
-            Self::error_unmatch_labels(&self.buffer, self.offset_of_buffer_head, Some(path.current()), None);
+          let expected = Some((path.current().match_begin, path.current().syntax().to_string()));
+          let (expected, actual) = error_unmatch_labels(&self.buffer, self.offset_of_buffer_head, expected, None);
           expecteds.push(expected);
           if repr_actual.is_empty() {
             repr_actual = actual;
@@ -274,40 +274,48 @@ where
   fn error_unmatch_with(
     location: E::Location, buffer: &[E], buffer_offset: u64, expected: Option<&State<ID, E>>, actual: Option<E>,
   ) -> Error<E> {
-    let (expected, actual) = Self::error_unmatch_labels(buffer, buffer_offset, expected, actual);
+    let expected = expected.map(|s| (s.match_begin, s.syntax().to_string()));
+    let (expected, actual) = error_unmatch_labels(buffer, buffer_offset, expected, actual);
     Error::Unmatched { location, expected, actual }
   }
+}
 
-  fn error_unmatch_labels(
-    buffer: &[E], buffer_offset: u64, expected: Option<&State<ID, E>>, actual: Option<E>,
-  ) -> (String, String) {
-    const SMPL_LEN: usize = 8;
-    const ELPS_LEN: usize = 3;
-    const EOF_SYMBOL: &str = "EOF";
+fn error_unmatch_labels<E: Item>(
+  buffer: &[E], buffer_offset: u64, expected: Option<(usize, String)>, actual: Option<E>,
+) -> (String, String) {
+  const ELPS_LEN: usize = 3;
+  const EOF_SYMBOL: &str = "EOF";
+  debug_assert!(expected.is_some() || actual.is_some());
+  debug_assert!(
+    expected.as_ref().map(|x| x.0 <= buffer.len()).unwrap_or(true),
+    "buffer overrun: {} > {}",
+    expected.as_ref().unwrap().0,
+    buffer.len()
+  );
 
-    let sampling_end = expected.map(|s| s.match_begin).unwrap_or(buffer.len());
-    let sampling_begin = sampling_end - std::cmp::min(SMPL_LEN, sampling_end);
-    let prefix_length = std::cmp::min(ELPS_LEN as u64, buffer_offset + sampling_begin as u64) as usize;
-    let prefix = (0..prefix_length).map(|_| ".").collect::<String>();
-    let expected = {
-      let sample = E::debug_symbols(&buffer[sampling_begin..sampling_end]);
-      let suffix = expected.map(|s| s.syntax().to_string()).unwrap_or_else(|| String::from(EOF_SYMBOL));
-      format!("{}{}[{}]", prefix, sample, suffix)
+  let smpl_len = E::SAMPLING_UNIT_AT_ERROR;
+  let sampling_end = expected.as_ref().map(|(begin, _)| *begin).unwrap_or(buffer.len());
+  let sampling_begin = sampling_end - std::cmp::min(smpl_len, sampling_end);
+  let prefix_length = std::cmp::min(ELPS_LEN as u64, buffer_offset + sampling_begin as u64) as usize;
+  let prefix = (0..prefix_length).map(|_| ".").collect::<String>();
+  let expected = {
+    let sample = E::debug_symbols(&buffer[sampling_begin..sampling_end]);
+    let suffix = expected.map(|s| s.1).unwrap_or_else(|| String::from(EOF_SYMBOL));
+    format!("{}{}[{}]", prefix, sample, suffix)
+  };
+  let actual = {
+    let sample = if buffer.len() - sampling_begin <= smpl_len * 3 + ELPS_LEN {
+      E::debug_symbols(&buffer[sampling_begin..])
+    } else {
+      let head = E::debug_symbols(&buffer[sampling_begin..][..smpl_len * 2]);
+      let ellapse = (0..ELPS_LEN).map(|_| ".").collect::<String>();
+      let tail = E::debug_symbols(&buffer[buffer.len() - smpl_len..]);
+      format!("{}{}{}", head, ellapse, tail)
     };
-    let actual = {
-      let sample = if buffer.len() - sampling_begin <= SMPL_LEN * 3 + ELPS_LEN {
-        E::debug_symbols(&buffer[sampling_begin..])
-      } else {
-        let head = E::debug_symbols(&buffer[sampling_begin..][..SMPL_LEN * 2]);
-        let ellapse = (0..ELPS_LEN).map(|_| ".").collect::<String>();
-        let tail = E::debug_symbols(&buffer[buffer.len() - SMPL_LEN..]);
-        format!("{}{}{}", head, ellapse, tail)
-      };
-      let suffix = actual.map(|i| E::debug_symbol(i)).unwrap_or_else(|| String::from(EOF_SYMBOL));
-      format!("{}{}[{}]", prefix, sample, suffix)
-    };
-    (expected, actual)
-  }
+    let suffix = actual.map(|i| E::debug_symbol(i)).unwrap_or_else(|| String::from(EOF_SYMBOL));
+    format!("{}{}[{}]", prefix, sample, suffix)
+  };
+  (expected, actual)
 }
 
 impl<'s, ID, H: FnMut(Event<ID, char>)> Context<'s, ID, char, H>

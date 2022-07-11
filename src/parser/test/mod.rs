@@ -1,4 +1,4 @@
-use crate::parser::{Context, Event, EventKind};
+use crate::parser::{error_unmatch_labels, Context, Event, EventKind};
 use crate::schema::chars::{self, ascii_alphabetic, ascii_digit, one_of_tokens, token};
 use crate::schema::{Item, Location, Schema, Syntax};
 use crate::{Error, Result};
@@ -228,7 +228,52 @@ fn context_with_enum_id() {
 }
 
 #[test]
-fn context_error_unmatch_labels() {}
+fn context_error_unmatch_labels() {
+  let buffer = (0..=100).map(|i| char::from_digit(i % 10, 10).unwrap()).collect::<Vec<_>>();
+
+  for (buffer_length, buffer_offset, offset, lead, sample) in &[
+    (0, 0, 0, "", ""),
+    (1, 0, 0, "", "0"),
+    (2, 0, 0, "", "01"),
+    (27, 0, 0, "", "012345678901234567890123456"),
+    (28, 0, 0, "", "0123456789012345...01234567"),
+    (29, 0, 0, "", "0123456789012345...12345678"),
+    (0, 1, 0, ".", ""),
+    (1, 1, 0, ".", "0"),
+    (27, 1, 0, ".", "012345678901234567890123456"),
+    (28, 1, 0, ".", "0123456789012345...01234567"),
+    (0, 2, 0, "..", ""),
+    (1, 2, 0, "..", "0"),
+    (27, 2, 0, "..", "012345678901234567890123456"),
+    (28, 2, 0, "..", "0123456789012345...01234567"),
+    (0, 3, 0, "...", ""),
+    (1, 3, 0, "...", "0"),
+    (27, 3, 0, "...", "012345678901234567890123456"),
+    (28, 3, 0, "...", "0123456789012345...01234567"),
+    (0, 4, 0, "...", ""),
+    (1, 4, 0, "...", "0"),
+    (27, 4, 0, "...", "012345678901234567890123456"),
+    (28, 4, 0, "...", "0123456789012345...01234567"),
+    (1, 0, 1, "0", ""),
+    (27, 0, 1, "0", "12345678901234567890123456"),
+    (28, 0, 1, "0", "123456789012345...01234567"),
+    (1, 3, 1, "...0", ""),
+    (27, 3, 1, "...0", "12345678901234567890123456"),
+    (28, 3, 1, "...0", "123456789012345...01234567"),
+    (11, 3, 11, "...34567890", ""),
+    (12, 3, 11, "...34567890", "1"),
+    (30, 3, 11, "...34567890", "1234567890123456789"),
+    (31, 3, 11, "...34567890", "12345678...34567890"),
+    (32, 3, 11, "...34567890", "12345678...45678901"),
+  ] {
+    let input = &buffer[..*buffer_length];
+    let i_expected = Some((*offset, String::from("DIGIT*")));
+    let i_actual = Some('X');
+    let expected = format!("{}[{}]", lead, i_expected.as_ref().unwrap().1);
+    let actual = format!("{}{}[{:?}]", lead, sample, i_actual.as_ref().unwrap());
+    assert_eq!((expected, actual), error_unmatch_labels::<char>(input, *buffer_offset, i_expected, i_actual));
+  }
+}
 
 #[test]
 fn context_seq_keywords() {
