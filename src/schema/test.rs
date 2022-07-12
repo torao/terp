@@ -70,9 +70,9 @@ fn syntax_or_concat() {
 }
 
 #[test]
-fn syntax_repetition() {
+fn syntax_repetition_multi_convolution() {
   let s = ((ascii_digit::<String>() * 5) * (2..=3)) * (1..4);
-  assert_eq!("ASCII_DIGIT{10,60}", s.to_string());
+  assert_eq!("ASCII_DIGIT{10,45}", s.to_string());
 }
 
 #[test]
@@ -82,11 +82,56 @@ fn syntax_repetition_for_sequence() {
 }
 
 #[test]
+fn syntax_repetition_quantifier_display() {
+  assert_eq!("ASCII_DIGIT{0}", (ascii_digit::<String>() * (0..=0)).to_string());
+  assert_eq!("ASCII_DIGIT?", (ascii_digit::<String>() * (0..=1)).to_string());
+  assert_eq!("ASCII_DIGIT{,2}", (ascii_digit::<String>() * (0..=2)).to_string());
+  assert_eq!("ASCII_DIGIT*", (ascii_digit::<String>() * (0..=usize::MAX)).to_string());
+  assert_eq!("ASCII_DIGIT", (ascii_digit::<String>() * (1..=1)).to_string());
+  assert_eq!("ASCII_DIGIT{1,2}", (ascii_digit::<String>() * (1..=2)).to_string());
+  assert_eq!("ASCII_DIGIT+", (ascii_digit::<String>() * (1..=usize::MAX)).to_string());
+  assert_eq!("ASCII_DIGIT{2}", (ascii_digit::<String>() * (2..=2)).to_string());
+  assert_eq!("ASCII_DIGIT{2,3}", (ascii_digit::<String>() * (2..=3)).to_string());
+  assert_eq!("ASCII_DIGIT{2,}", (ascii_digit::<String>() * (2..=usize::MAX)).to_string());
+  assert_eq!(
+    format!("ASCII_DIGIT{{{}}}", usize::MAX),
+    (ascii_digit::<String>() * (usize::MAX..=usize::MAX)).to_string()
+  );
+}
+
+#[test]
+fn syntax_repetition_multi_op_with_range() {
+  // usize
+  let syntax = ascii_alphabetic::<String>() * 10;
+  assert_eq!("ASCII_ALPHA{10}", syntax.to_string());
+
+  // Range
+  let syntax = ascii_alphabetic::<String>() * (3..10);
+  assert_eq!("ASCII_ALPHA{3,9}", syntax.to_string());
+
+  // RangeInclusive
+  let syntax = ascii_alphabetic::<String>() * (3..=10);
+  assert_eq!("ASCII_ALPHA{3,10}", syntax.to_string());
+
+  // RangeFrom
+  let syntax = ascii_alphabetic::<String>() * (3..);
+  assert_eq!("ASCII_ALPHA{3,}", syntax.to_string());
+
+  // RangeTo
+  let syntax = ascii_alphabetic::<String>() * (..10);
+  assert_eq!("ASCII_ALPHA{,9}", syntax.to_string());
+
+  // RangeToInclusive
+  let syntax = ascii_alphabetic::<String>() * (..=10);
+  assert_eq!("ASCII_ALPHA{,10}", syntax.to_string());
+}
+
+#[test]
 fn syntax_display() {
   for (reps, expected) in vec![
     (0..=0, "{0}"),
     (0..=1, "?"),
-    (0..=2, "{0,2}"),
+    (0..=2, "{,2}"),
     (0..=usize::MAX, "*"),
     (1..=1, ""),
     (1..=2, "{1,2}"),

@@ -59,7 +59,7 @@ fn schema() -> Schema<ID, char> {
     .define(EndObject, id(WS) & ch('}') & id(WS))
     .define(NameSeparator, id(WS) & ch(':') & id(WS))
     .define(ValueSeparator, id(WS) & ch(',') & id(WS))
-    .define(WS, one_of(&[' ', '\t', '\x0A', '\x0D']) * (0..=usize::MAX))
+    .define(WS, one_of(&[' ', '\t', '\x0A', '\x0D']) * (0..))
     .define(Value, id(False) | id(Null) | id(True) | id(Object) | id(Array) | id(Number) | id(String))
     .define(False, token("false"))
     .define(Null, token("null"))

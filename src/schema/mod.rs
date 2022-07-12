@@ -2,7 +2,7 @@ use crate::Result;
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Display};
 use std::marker::Send;
-use std::ops::{BitAnd, BitOr, Mul, RangeInclusive};
+use std::ops::{BitAnd, BitOr, Mul, RangeFrom, RangeInclusive, RangeTo, RangeToInclusive};
 
 pub mod bytes;
 pub mod chars;
@@ -268,6 +268,8 @@ impl<ID: Display + Debug, E: Item> Display for Syntax<ID, E> {
         write!(f, "{{{}}}", min)
       } else if max == usize::MAX {
         write!(f, "{{{},}}", min)
+      } else if min == 0 {
+        write!(f, "{{,{}}}", max)
       } else {
         write!(f, "{{{},{}}}", min, max)
       }
@@ -311,7 +313,7 @@ impl<ID: Debug, E: 'static + Item> Mul<std::ops::Range<usize>> for Syntax<ID, E>
   type Output = Self;
 
   fn mul(self, rhs: std::ops::Range<usize>) -> Self::Output {
-    self * (rhs.start..=rhs.end)
+    self * (rhs.start..=rhs.end - 1)
   }
 }
 
@@ -320,6 +322,30 @@ impl<ID: Debug, E: 'static + Item> Mul<RangeInclusive<usize>> for Syntax<ID, E> 
 
   fn mul(self, rhs: RangeInclusive<usize>) -> Self::Output {
     self.reps(rhs)
+  }
+}
+
+impl<ID: Debug, E: 'static + Item> Mul<RangeFrom<usize>> for Syntax<ID, E> {
+  type Output = Self;
+
+  fn mul(self, rhs: RangeFrom<usize>) -> Self::Output {
+    self.reps(rhs.start..=usize::MAX)
+  }
+}
+
+impl<ID: Debug, E: 'static + Item> Mul<RangeTo<usize>> for Syntax<ID, E> {
+  type Output = Self;
+
+  fn mul(self, rhs: RangeTo<usize>) -> Self::Output {
+    self * (0..=rhs.end - 1)
+  }
+}
+
+impl<ID: Debug, E: 'static + Item> Mul<RangeToInclusive<usize>> for Syntax<ID, E> {
+  type Output = Self;
+
+  fn mul(self, rhs: RangeToInclusive<usize>) -> Self::Output {
+    self.reps(0..=rhs.end)
   }
 }
 
