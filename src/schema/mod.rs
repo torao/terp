@@ -6,6 +6,7 @@ use std::ops::{BitAnd, BitOr, Mul, RangeFrom, RangeInclusive, RangeTo, RangeToIn
 
 pub mod bytes;
 pub mod chars;
+pub mod json;
 
 mod matcher;
 pub use matcher::*;
