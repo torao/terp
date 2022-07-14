@@ -10,7 +10,7 @@ mod event;
 pub use event::*;
 
 #[cfg(test)]
-mod test;
+pub mod test;
 
 pub struct Context<'s, ID, E: Item, H: FnMut(Event<ID, E>)>
 where

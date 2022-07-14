@@ -5,7 +5,6 @@ use crate::{Error, Result};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 
-mod json;
 mod or;
 mod zero_repetition;
 
