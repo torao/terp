@@ -1,3 +1,4 @@
+//#![feature(test)]
 use schema::Item;
 
 pub mod parser;
@@ -5,6 +6,24 @@ pub mod schema;
 
 #[cfg(test)]
 mod test;
+
+#[cfg(debug_assertions)]
+#[macro_export]
+macro_rules! debug {
+  () => { eprintln!("[{}:{}]", file!(), line!()) };
+  ($fmt:expr) => {{ eprintln!("[{}:{}] {}", file!(), line!(), $fmt) }};
+  ($fmt:expr, $($arg:tt)*) => {{ let s = format!($fmt, $($arg)*); eprintln!("[{}:{}] {}", file!(), line!(), s); }};
+}
+
+#[cfg(not(debug_assertions))]
+#[macro_export]
+macro_rules! debug {
+  ($first:expr) => {{ let _ = &$first; }};
+  ($first:expr, $($arg:expr),*) => {{
+    debug!($first);
+    debug!($($arg),+);
+  }};
+}
 
 pub type Result<E, T> = std::result::Result<T, Error<E>>;
 

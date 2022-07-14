@@ -1,5 +1,5 @@
 use crate::schema::{Item, Location, Primary, Schema, Syntax};
-use crate::{Error, Result};
+use crate::{debug, Error, Result};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 
@@ -48,9 +48,9 @@ where
   }
 
   pub fn push(&mut self, item: E) -> Result<E, ()> {
-    println!("PUSH: {:?}, buf_size={}", item, self.buffer.len());
+    debug!("PUSH: {:?}, buf_size={}", item, self.buffer.len());
     for (i, path) in self.ongoing.iter().enumerate() {
-      println!("  ONGOING[{}]: {}", i, path)
+      debug!("  ONGOING[{}]: {}", i, path)
     }
 
     self.check_error(false, Some(item))?;
@@ -74,7 +74,7 @@ where
   }
 
   pub fn finish(mut self) -> Result<E, ()> {
-    println!("FINISH");
+    debug!("FINISH");
 
     self.check_error(true, None)?;
 
@@ -152,7 +152,7 @@ where
 
     while let Some(mut path) = ongoing.pop() {
       debug_assert!(matches!(path.current().syntax().primary, Primary::Term(..)));
-      println!("~ === {}", path);
+      debug!("~ === {}", path);
 
       let matched = match path.current_mut().matches(&self.buffer, eof)? {
         Matching::Match(_length, event) => {
@@ -202,7 +202,7 @@ where
       let mut j = i + 1;
       while j < paths.len() {
         if paths[i].can_merge(&paths[j]) {
-          println!("~ duplicated: [{},{}]{}", i, j, paths[j]);
+          debug!("~ duplicated: [{},{}]{}", i, j, paths[j]);
           paths.remove(j);
         } else {
           j += 1;

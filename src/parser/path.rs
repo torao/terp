@@ -1,6 +1,6 @@
 use crate::parser::{Event, EventKind};
 use crate::schema::{Item, Location, MatchResult, Primary, Schema, Syntax};
-use crate::{Error, Result};
+use crate::{debug, Error, Result};
 use std::fmt::{Debug, Display, Write};
 use std::hash::Hash;
 
@@ -65,7 +65,7 @@ where
         (true, true) => state.appearances >= *state.syntax().repetition.start(),
         (true, false) => {
           if state.appearances < *state.syntax().repetition.end() {
-            println!("~ repeated: {} / {}", state.syntax(), state.appearances);
+            debug!("~ repeated: {} / {}", state.syntax(), state.appearances);
             state.proceed_along_buffer(buffer);
             self.stack_pop(i);
             self.complete_eval_of_current_position(false);
@@ -87,7 +87,7 @@ where
       }
     }
 
-    println!("~ confirmed: {} ({})", self.current().syntax(), if matched { "Matched" } else { "Unmatched" });
+    debug!("~ confirmed: {} ({})", self.current().syntax(), if matched { "Matched" } else { "Unmatched" });
     (matched, true)
   }
 
@@ -127,7 +127,7 @@ where
   }
 
   pub fn stack_push_alias(&mut self, id: &ID) -> Result<E, ()> {
-    println!("~ begined: {}", id);
+    debug!("~ begined: {}", id);
     self.stack_push(Self::get_definition(id, self.schema)?);
     Ok(())
   }
@@ -166,14 +166,14 @@ where
   fn complete_eval_of_current_position(&mut self, move_next: bool) {
     let StackFrame { state, current, parent, _debug } = self.stack.last_mut().unwrap();
     let event = if let Primary::Alias(id) = &parent[*current].primary {
-      println!("~ ended: {}", id);
+      debug!("~ ended: {}", id);
       Some(state.event(EventKind::End(id.clone())))
     } else {
       None
     };
 
     if move_next {
-      println!("~ moved: {} -> {}", parent[*current], parent[*current + 1]);
+      debug!("~ moved: {} -> {}", parent[*current], parent[*current + 1]);
       *current += 1;
       state.syntax = &parent[*current];
       state.appearances = 0;
@@ -289,7 +289,7 @@ where
     let reps = &self.syntax.repetition;
     debug_assert!(self.appearances <= *reps.end());
     if !self.can_repeate_more() {
-      println!("~ matched: {}({}) -> no data", self.syntax(), E::debug_symbols(items),);
+      debug!("~ matched: {}({}) -> no data", self.syntax(), E::debug_symbols(items));
       return Ok(Matching::Match(0, None));
     }
 
@@ -309,11 +309,11 @@ where
       MatchResult::Match(length) => {
         self.match_length = length;
         let values = self.extract(buffer).to_vec();
-        println!("~ matched: {}({}) -> [{}]", self.syntax(), E::debug_symbols(items), E::debug_symbols(&values));
+        debug!("~ matched: {}({}) -> [{}]", self.syntax(), E::debug_symbols(items), E::debug_symbols(&values));
         Matching::Match(length, Some(self.event(EventKind::Fragments(values))))
       }
       MatchResult::Unmatch => {
-        println!("~ unmatched: {}({})", self.syntax(), E::debug_symbols(items),);
+        debug!("~ unmatched: {}({})", self.syntax(), E::debug_symbols(items));
         Matching::Unmatch
       }
       MatchResult::MatchAndCanAcceptMore(_) | MatchResult::UnmatchAndCanAcceptMore => Matching::More,
