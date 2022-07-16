@@ -442,6 +442,12 @@ impl<ID: Clone + Display + Debug + Eq> Events<ID> {
   }
 }
 
+impl<ID: Clone + Display + Debug + Eq> Default for Events<ID> {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
 #[allow(dead_code)]
 pub fn dump_context<ID, E: Item, H: FnMut(Event<ID, E>)>(parser: &Context<ID, E, H>)
 where
