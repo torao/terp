@@ -1,4 +1,4 @@
-use crate::parser::{Event, EventKind};
+use crate::parser::{Event, EventBuffer, EventKind};
 use crate::schema::{Item, Location, MatchResult, Primary, Schema, Syntax};
 use crate::{debug, Error, Result};
 use std::fmt::{Debug, Display, Write};
@@ -10,7 +10,7 @@ where
   ID: Clone + Display + Debug + PartialEq,
 {
   schema: &'s Schema<ID, E>,
-  event_buffer: Vec<Event<ID, E>>,
+  event_buffer: EventBuffer<ID, E>,
   stack: Vec<StackFrame<'s, ID, E>>,
 
   // For variable watch during step execution.
@@ -23,7 +23,7 @@ where
   ID: Clone + Hash + Ord + Display + Debug,
 {
   pub fn new(id: &ID, schema: &'s Schema<ID, E>) -> Result<E, Self> {
-    let event_buffer = Vec::with_capacity(16);
+    let event_buffer = EventBuffer::new(16);
     let stack = Vec::with_capacity(16);
 
     let mut path = Self {
@@ -113,17 +113,8 @@ where
     }
 
     // holds the same events
-    debug_assert_eq!(Event::normalize(self.event_buffer.clone()), self.event_buffer);
-    if self.event_buffer.len() != other.event_buffer.len() {
-      return false;
-    }
-    for i in (0..self.event_buffer.len()).rev() {
-      if self.event_buffer[i] != other.event_buffer[i] {
-        return false;
-      }
-    }
-
-    true
+    debug_assert_eq!(self.event_buffer.clone().normalize(), self.event_buffer);
+    self.event_buffer == other.event_buffer
   }
 
   pub fn stack_push_alias(&mut self, id: &ID) -> Result<E, ()> {
@@ -184,13 +175,11 @@ where
   }
 
   pub fn events_push(&mut self, e: Event<ID, E>) {
-    Event::append(&mut self.event_buffer, e);
+    self.event_buffer.push(e)
   }
 
   pub fn events_flush_to<H: FnMut(Event<ID, E>)>(&mut self, handler: &mut H) {
-    while !self.event_buffer.is_empty() {
-      (handler)(self.event_buffer.remove(0));
-    }
+    self.event_buffer.flush_to(handler)
   }
 
   pub fn min_match_begin(&self) -> usize {

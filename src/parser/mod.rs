@@ -35,9 +35,10 @@ where
 
     let mut first = Path::new(&id, schema)?;
     first.events_push(first.current().event(EventKind::Begin(id.clone())));
+    let mut ongoing = Vec::with_capacity(16);
+    ongoing.push(first);
 
     let location = E::Location::default();
-    let ongoing = Self::move_ongoing_paths_to_next_term(first)?;
     let prev_completed = Vec::with_capacity(16);
     let prev_unmatched = Vec::with_capacity(16);
     Ok(Self { id, event_handler, location, buffer, offset_of_buffer_head: 0, ongoing, prev_completed, prev_unmatched })
@@ -55,20 +56,22 @@ where
 
     self.check_error(false, Some(item))?;
 
-    if self.ongoing.len() == 1 {
-      self.ongoing[0].events_flush_to(&mut self.event_handler);
-    }
-
-    // reduce internal buffer if possible
-    self.fit_buffer_to_min_size();
-
     // add item into buffer
     self.buffer.push(item);
     self.location.increment_with(item);
 
-    self.evaluate_ongoing_paths_and_move_matched_ones_to_next_term(false)?;
+    self.proceed(false)?;
 
     self.check_error(false, None)?;
+
+    if self.ongoing.len() == 1 && self.prev_completed.is_empty() {
+      self.ongoing[0].events_flush_to(&mut self.event_handler);
+    } else if self.ongoing.is_empty() && self.prev_completed.len() == 1 {
+      self.prev_completed[0].events_flush_to(&mut self.event_handler);
+    }
+
+    // reduce internal buffer if possible
+    self.fit_buffer_to_min_size();
 
     Ok(())
   }
@@ -79,7 +82,7 @@ where
     self.check_error(true, None)?;
 
     while !self.ongoing.is_empty() {
-      self.evaluate_ongoing_paths_and_move_matched_ones_to_next_term(true)?;
+      self.proceed(true)?;
     }
 
     match self.prev_completed.len() {
@@ -108,46 +111,14 @@ where
     }
   }
 
-  fn move_ongoing_paths_to_next_term(path: Path<'s, ID, E>) -> Result<E, Vec<Path<'s, ID, E>>> {
-    let mut ongoing = vec![path];
-    let mut term_reached = Vec::with_capacity(ongoing.len());
-    while let Some(mut eval_path) = ongoing.pop() {
-      match &eval_path.current().syntax().primary {
-        Primary::Term(..) => {
-          term_reached.push(eval_path);
-        }
-        Primary::Alias(id) => {
-          eval_path.stack_push_alias(id)?;
-          eval_path.events_push(eval_path.current().event(EventKind::Begin(id.clone())));
-          ongoing.push(eval_path);
-        }
-        Primary::Seq(seq) => {
-          eval_path.stack_push(seq);
-          ongoing.push(eval_path);
-        }
-        Primary::Or(branches) => {
-          for branch in branches {
-            if let Syntax { primary: Primary::Seq(seq), .. } = branch {
-              let mut next = eval_path.clone();
-              next.stack_push(seq);
-              ongoing.push(next);
-            } else {
-              unreachable!("Primary::Or contains a branch other than Seq")
-            }
-          }
-        }
-      }
-    }
-    debug_assert!(!term_reached.is_empty());
-    debug_assert!(term_reached.iter().all(|t| matches!(t.current().syntax().primary, Primary::Term(..))));
-    Ok(term_reached)
-  }
-
-  fn evaluate_ongoing_paths_and_move_matched_ones_to_next_term(&mut self, eof: bool) -> Result<E, ()> {
-    let mut ongoing = self.ongoing.drain(..).collect::<Vec<_>>();
+  fn proceed(&mut self, eof: bool) -> Result<E, ()> {
     if !eof {
       self.prev_completed.truncate(0);
       self.prev_unmatched.truncate(0);
+    }
+    let mut ongoing = Vec::with_capacity(self.ongoing.len());
+    for path in self.ongoing.drain(..) {
+      ongoing.append(&mut Self::move_ongoing_paths_to_next_term(path)?);
     }
 
     while let Some(mut path) = ongoing.pop() {
@@ -195,6 +166,41 @@ where
     Self::merge_paths(&mut self.prev_completed);
     Self::merge_paths(&mut self.prev_unmatched);
     Ok(())
+  }
+
+  fn move_ongoing_paths_to_next_term(path: Path<'s, ID, E>) -> Result<E, Vec<Path<'s, ID, E>>> {
+    let mut ongoing = vec![path];
+    let mut term_reached = Vec::with_capacity(ongoing.len());
+    while let Some(mut eval_path) = ongoing.pop() {
+      match &eval_path.current().syntax().primary {
+        Primary::Term(..) => {
+          term_reached.push(eval_path);
+        }
+        Primary::Alias(id) => {
+          eval_path.stack_push_alias(id)?;
+          eval_path.events_push(eval_path.current().event(EventKind::Begin(id.clone())));
+          ongoing.push(eval_path);
+        }
+        Primary::Seq(seq) => {
+          eval_path.stack_push(seq);
+          ongoing.push(eval_path);
+        }
+        Primary::Or(branches) => {
+          for branch in branches {
+            if let Syntax { primary: Primary::Seq(seq), .. } = branch {
+              let mut next = eval_path.clone();
+              next.stack_push(seq);
+              ongoing.push(next);
+            } else {
+              unreachable!("Primary::Or contains a branch other than Seq")
+            }
+          }
+        }
+      }
+    }
+    debug_assert!(!term_reached.is_empty());
+    debug_assert!(term_reached.iter().all(|t| matches!(t.current().syntax().primary, Primary::Term(..))));
+    Ok(term_reached)
   }
 
   fn merge_paths(paths: &mut Vec<Path<ID, E>>) {

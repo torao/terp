@@ -1,4 +1,4 @@
-use crate::parser::{error_unmatch_labels, Context, Event, EventKind};
+use crate::parser::{error_unmatch_labels, Context, Event, EventBuffer, EventKind};
 use crate::schema::chars::{self, ascii_alphabetic, ascii_digit, one_of_tokens, token};
 use crate::schema::{Item, Location, Schema, Syntax};
 use crate::{Error, Result};
@@ -286,8 +286,12 @@ fn context_seq_keywords() {
   let a = keywords.iter().map(|kwd| token(*kwd)).reduce(|a, b| a | b).unwrap();
   let schema = Schema::new("Foo").define("A", a);
   for kwd in &keywords {
+    eprintln!("[{}] ---------------------", kwd);
     let mut events = Vec::new();
-    let handler = |e: Event<_, _>| events.push(e);
+    let handler = |e: Event<_, _>| {
+      eprintln!("> Event[{}] {:?}", e.location, e.kind);
+      events.push(e);
+    };
     let mut parser = Context::new(&schema, "A", handler).unwrap();
     parser.push_str(kwd).unwrap();
     parser.finish().unwrap();
@@ -392,12 +396,22 @@ fn assert_eq_without_order<T: Clone + Eq + Debug + From<U>, U>(expected: Vec<U>,
 }
 
 fn assert_events_eq<ID: Clone + Display + Debug + Eq>(expected: &[Event<ID, char>], actual: &[Event<ID, char>]) {
-  let expected = Event::normalize(expected.to_vec());
-  let actual = Event::normalize(actual.to_vec());
+  let expected = normalize(expected);
+  let actual = normalize(actual);
   let len = std::cmp::max(expected.len(), actual.len());
   for i in 0..len {
     assert_eq!(expected.get(i), actual.get(i), "unexpected event @{}:\n  {:?}\n  {:?}", i, expected, actual);
   }
+}
+
+fn normalize<ID: Clone + Display + Debug + Eq>(events: &[Event<ID, char>]) -> Vec<Event<ID, char>> {
+  let mut buffer = EventBuffer::new(events.len());
+  for e in events {
+    buffer.push(e.clone());
+  }
+  let mut events = Vec::with_capacity(events.len());
+  buffer.flush_to(&mut |e| events.push(e));
+  events
 }
 
 fn location(chars: u64, lines: u64, columns: u64) -> chars::Location {
