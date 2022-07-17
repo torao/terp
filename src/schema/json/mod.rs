@@ -2,9 +2,6 @@ use crate::schema::chars::{ch, token};
 use crate::schema::{id, one_of, range, Schema};
 use std::fmt::Display;
 
-#[cfg(test)]
-mod test;
-
 #[derive(Hash, Clone, Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum ID {
   JsonText,

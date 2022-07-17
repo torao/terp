@@ -5,9 +5,9 @@ use std::fmt::{Debug, Display, Write};
 use std::hash::Hash;
 
 #[derive(Clone, Debug)]
-pub struct Path<'s, ID, E: Item>
+pub(crate) struct Path<'s, ID, E: Item>
 where
-  ID: Clone + Display + Debug + PartialEq,
+  ID: Clone + Display + Debug + PartialEq + Eq + Hash,
 {
   schema: &'s Schema<ID, E>,
   event_buffer: EventBuffer<ID, E>,
@@ -43,6 +43,10 @@ where
 
   pub fn current_mut(&mut self) -> &mut State<'s, ID, E> {
     &mut self.stack.last_mut().unwrap().state
+  }
+
+  pub fn event_buffer_mut(&mut self) -> &mut EventBuffer<ID, E> {
+    &mut self.event_buffer
   }
 
   /// return false if the end of reached.
@@ -261,7 +265,7 @@ where
 
 impl<'s, ID, E: 'static + Item> State<'s, ID, E>
 where
-  ID: Clone + Display + Debug + PartialEq,
+  ID: Clone + Display + Debug + PartialEq + Eq + Hash,
 {
   pub fn new(syntax: &'s Syntax<ID, E>) -> Self {
     Self { location: E::Location::default(), match_begin: 0, match_length: 0, appearances: 0, syntax }
@@ -339,7 +343,7 @@ where
 
 pub enum Matching<ID, E: Item>
 where
-  ID: Clone + Display + Debug + PartialEq,
+  ID: Clone + Display + Debug + PartialEq + Eq + Hash,
 {
   Match(usize, Option<Event<ID, E>>),
   More,

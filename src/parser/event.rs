@@ -1,17 +1,21 @@
-use std::fmt::{Debug, Display};
+use std::{
+  collections::HashSet,
+  fmt::{Debug, Display},
+  hash::Hash,
+};
 
 use crate::schema::Item;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event<ID, E: Item>
 where
-  ID: Clone + Display + Debug + PartialEq,
+  ID: Clone + Display + Debug + PartialEq + Eq + Hash,
 {
   pub location: E::Location,
   pub kind: EventKind<ID, E>,
 }
 
-impl<ID, E: Item> Event<ID, E> where ID: Clone + Display + Debug + PartialEq {}
+impl<ID, E: Item> Event<ID, E> where ID: Clone + Display + Debug + PartialEq + Eq + Hash {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EventKind<ID, E: Item>
@@ -26,9 +30,10 @@ where
 #[derive(Clone, Debug)]
 pub(crate) struct EventBuffer<ID, E: Item>
 where
-  ID: Clone + Display + Debug + PartialEq,
+  ID: Clone + Display + Debug + PartialEq + Eq + Hash,
 {
   events: Vec<Event<ID, E>>,
+  ignore: HashSet<ID>,
 
   // to verify Begin/End conbinations
   #[cfg(test)]
@@ -37,13 +42,20 @@ where
 
 impl<ID, E: Item> EventBuffer<ID, E>
 where
-  ID: Clone + Display + Debug + PartialEq,
+  ID: Clone + Display + Debug + PartialEq + Eq + Hash,
 {
   pub fn new(capacity: usize) -> Self {
     Self {
       events: Vec::with_capacity(capacity),
+      ignore: HashSet::new(),
       #[cfg(test)]
       _event_stack: Vec::with_capacity(16),
+    }
+  }
+
+  pub fn ignore_events_for(&mut self, ids: &[ID]) {
+    for id in ids {
+      self.ignore.insert(id.clone());
     }
   }
 
@@ -74,7 +86,11 @@ where
           _ => (),
         }
 
-        self.events.push(e);
+        match &e {
+          Event { kind: EventKind::Begin(id), .. } if self.ignore.contains(id) => (),
+          Event { kind: EventKind::End(id), .. } if self.ignore.contains(id) => (),
+          _ => self.events.push(e),
+        }
       }
     }
   }
@@ -96,7 +112,7 @@ where
 
 impl<ID, E: Item> PartialEq for EventBuffer<ID, E>
 where
-  ID: Clone + Display + Debug + PartialEq,
+  ID: Clone + Display + Debug + PartialEq + Eq + Hash,
 {
   fn eq(&self, other: &Self) -> bool {
     if self.events.len() != other.events.len() {

@@ -44,6 +44,13 @@ where
     Ok(Self { id, event_handler, location, buffer, offset_of_buffer_head: 0, ongoing, prev_completed, prev_unmatched })
   }
 
+  pub fn ignore_events_for(mut self, ids: &[ID]) -> Self {
+    for ongoing in &mut self.ongoing {
+      ongoing.event_buffer_mut().ignore_events_for(ids);
+    }
+    self
+  }
+
   pub fn id(&self) -> &ID {
     &self.id
   }

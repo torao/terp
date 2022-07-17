@@ -5,6 +5,7 @@ use crate::{Error, Result};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 
+mod json;
 mod or;
 mod zero_repetition;
 
@@ -395,7 +396,9 @@ fn assert_eq_without_order<T: Clone + Eq + Debug + From<U>, U>(expected: Vec<U>,
   assert!(actual.is_empty(), "expected {:?}, but {:?} exists", e, actual);
 }
 
-fn assert_events_eq<ID: Clone + Display + Debug + Eq>(expected: &[Event<ID, char>], actual: &[Event<ID, char>]) {
+fn assert_events_eq<ID: Clone + Display + Debug + Eq + Eq + Hash>(
+  expected: &[Event<ID, char>], actual: &[Event<ID, char>],
+) {
   let expected = normalize(expected);
   let actual = normalize(actual);
   let len = std::cmp::max(expected.len(), actual.len());
@@ -404,7 +407,7 @@ fn assert_events_eq<ID: Clone + Display + Debug + Eq>(expected: &[Event<ID, char
   }
 }
 
-fn normalize<ID: Clone + Display + Debug + Eq>(events: &[Event<ID, char>]) -> Vec<Event<ID, char>> {
+fn normalize<ID: Clone + Display + Debug + Eq + Eq + Hash>(events: &[Event<ID, char>]) -> Vec<Event<ID, char>> {
   let mut buffer = EventBuffer::new(events.len());
   for e in events {
     buffer.push(e.clone());
@@ -418,13 +421,13 @@ fn location(chars: u64, lines: u64, columns: u64) -> chars::Location {
   chars::Location { chars, lines, columns }
 }
 
-pub struct Events<ID: Clone + Display + Debug + Eq> {
+pub struct Events<ID: Clone + Display + Debug + Eq + Eq + Hash> {
   location: chars::Location,
   events: Vec<Event<ID, char>>,
   stack: Vec<ID>,
 }
 
-impl<ID: Clone + Display + Debug + Eq> Events<ID> {
+impl<ID: Clone + Display + Debug + Eq + Eq + Hash> Events<ID> {
   pub fn new() -> Self {
     let events = Vec::with_capacity(16);
     let stack = Vec::with_capacity(4);
@@ -456,7 +459,7 @@ impl<ID: Clone + Display + Debug + Eq> Events<ID> {
   }
 }
 
-impl<ID: Clone + Display + Debug + Eq> Default for Events<ID> {
+impl<ID: Clone + Display + Debug + Eq + Eq + Hash> Default for Events<ID> {
   fn default() -> Self {
     Self::new()
   }
