@@ -1,4 +1,5 @@
-//#![feature(test)]
+#![feature(test)]
+
 use schema::Item;
 
 pub mod parser;
