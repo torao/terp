@@ -14,7 +14,7 @@ pub mod test;
 
 pub struct Context<'s, ID, E: Item, H: FnMut(Event<ID, E>)>
 where
-  ID: Clone + Hash + Eq + Ord + Display + Debug,
+  ID: Clone + Hash + Eq + Ord + Display + Debug + Send + Sync,
 {
   id: ID,
   event_handler: H,
@@ -28,7 +28,7 @@ where
 
 impl<'s, ID, E: 'static + Item, H: FnMut(Event<ID, E>)> Context<'s, ID, E, H>
 where
-  ID: 's + Clone + Hash + Eq + Ord + Display + Debug,
+  ID: 's + Clone + Hash + Eq + Ord + Display + Debug + Send + Sync,
 {
   pub fn new(schema: &'s Schema<ID, E>, id: ID, event_handler: H) -> Result<E, Self> {
     let buffer = Vec::with_capacity(1024);
@@ -123,49 +123,29 @@ where
       self.prev_completed.truncate(0);
       self.prev_unmatched.truncate(0);
     }
-    let mut ongoing = Vec::with_capacity(self.ongoing.len());
+    let mut evaluating: Vec<Path<'s, ID, E>> = Vec::with_capacity(self.ongoing.len());
     for path in self.ongoing.drain(..) {
-      ongoing.append(&mut Self::move_ongoing_paths_to_next_term(path)?);
+      evaluating.append(&mut Self::move_ongoing_paths_to_next_term(path)?);
     }
 
-    while let Some(mut path) = ongoing.pop() {
-      debug_assert!(matches!(path.current().syntax().primary, Primary::Term(..)));
-      debug!("~ === {}", path);
-
-      let matched = match path.current_mut().matches(&self.buffer, eof)? {
-        Matching::Match(_length, event) => {
-          if let Some(event) = event {
-            path.events_push(event);
-          }
-          debug_assert!(matches!(path.current().syntax().primary, Primary::Term(..)));
-          true
-        }
-        Matching::Unmatch => false,
-        Matching::More => {
-          self.ongoing.push(path);
-          continue;
-        }
+    while !evaluating.is_empty() {
+      let nexts = if evaluating.len() == 1 {
+        vec![Self::proceed_on_path(evaluating.pop().unwrap(), &self.buffer, eof)]
+      } else {
+        use rayon::prelude::*;
+        evaluating.par_drain(..).map(|path| Self::proceed_on_path(path, &self.buffer, eof)).collect::<Vec<_>>()
       };
 
-      match path.move_to_next(&self.buffer, matched, eof) {
-        (true, true) => {
-          let uncapture_exists = path.current().match_begin + path.current().match_length < self.buffer.len();
-          if uncapture_exists {
-            self.prev_unmatched.push(path);
-          } else {
-            self.prev_completed.push(path);
-          }
+      for next in nexts {
+        let NextPaths { mut need_to_be_reevaluated, mut ongoing, unmatched, completed } = next?;
+        evaluating.append(&mut need_to_be_reevaluated);
+        self.ongoing.append(&mut ongoing);
+        if let Some(unmatched) = unmatched {
+          self.prev_unmatched.push(unmatched);
         }
-        (true, _) => {
-          let uncapture_exists = path.current().match_begin + path.current().match_length < self.buffer.len();
-          let mut nexts = Self::move_ongoing_paths_to_next_term(path)?;
-          if uncapture_exists {
-            ongoing.append(&mut nexts);
-          } else {
-            self.ongoing.append(&mut nexts);
-          }
+        if let Some(completed) = completed {
+          self.prev_completed.push(completed);
         }
-        (false, _) => self.prev_unmatched.push(path),
       }
     }
 
@@ -173,6 +153,55 @@ where
     Self::merge_paths(&mut self.prev_completed);
     Self::merge_paths(&mut self.prev_unmatched);
     Ok(())
+  }
+
+  fn proceed_on_path(mut path: Path<'s, ID, E>, buffer: &[E], eof: bool) -> Result<E, NextPaths<'s, ID, E>> {
+    debug_assert!(matches!(path.current().syntax().primary, Primary::Term(..)));
+    debug!("~ === {}", path);
+
+    let mut next = NextPaths {
+      need_to_be_reevaluated: Vec::with_capacity(1),
+      ongoing: Vec::with_capacity(1),
+      unmatched: None,
+      completed: None,
+    };
+
+    let matched = match path.current_mut().matches(buffer, eof)? {
+      Matching::Match(_length, event) => {
+        if let Some(event) = event {
+          path.events_push(event);
+        }
+        debug_assert!(matches!(path.current().syntax().primary, Primary::Term(..)));
+        true
+      }
+      Matching::Unmatch => false,
+      Matching::More => {
+        next.ongoing.push(path);
+        return Ok(next);
+      }
+    };
+
+    match path.move_to_next(buffer, matched, eof) {
+      (true, true) => {
+        let uncapture_exists = path.current().match_begin + path.current().match_length < buffer.len();
+        if uncapture_exists {
+          next.unmatched = Some(path);
+        } else {
+          next.completed = Some(path);
+        }
+      }
+      (true, _) => {
+        let uncapture_exists = path.current().match_begin + path.current().match_length < buffer.len();
+        let mut nexts = Self::move_ongoing_paths_to_next_term(path)?;
+        if uncapture_exists {
+          next.need_to_be_reevaluated.append(&mut nexts);
+        } else {
+          next.ongoing.append(&mut nexts);
+        }
+      }
+      (false, _) => next.unmatched = Some(path),
+    }
+    return Ok(next);
   }
 
   fn move_ongoing_paths_to_next_term(path: Path<'s, ID, E>) -> Result<E, Vec<Path<'s, ID, E>>> {
@@ -333,7 +362,7 @@ fn error_unmatch_labels<E: Item>(
 
 impl<'s, ID, H: FnMut(Event<ID, char>)> Context<'s, ID, char, H>
 where
-  ID: 's + Clone + Hash + Eq + Ord + Display + Debug,
+  ID: 's + Clone + Hash + Eq + Ord + Display + Debug + Send + Sync,
 {
   pub fn push_str(&mut self, s: &str) -> Result<char, ()> {
     for ch in s.chars() {
@@ -341,4 +370,14 @@ where
     }
     Ok(())
   }
+}
+
+struct NextPaths<'s, ID, E: Item>
+where
+  ID: 's + Clone + Hash + Eq + Ord + Display + Debug + Send + Sync,
+{
+  pub need_to_be_reevaluated: Vec<Path<'s, ID, E>>,
+  pub ongoing: Vec<Path<'s, ID, E>>,
+  pub unmatched: Option<Path<'s, ID, E>>,
+  pub completed: Option<Path<'s, ID, E>>,
 }
