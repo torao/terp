@@ -36,7 +36,7 @@ where
   ignore: HashSet<ID>,
 
   // to verify Begin/End conbinations
-  #[cfg(test)]
+  #[cfg(debug_assertions)]
   _event_stack: Vec<ID>,
 }
 
@@ -48,7 +48,7 @@ where
     Self {
       events: Vec::with_capacity(capacity),
       ignore: HashSet::new(),
-      #[cfg(test)]
+      #[cfg(debug_assertions)]
       _event_stack: Vec::with_capacity(16),
     }
   }
@@ -66,14 +66,14 @@ where
         current.append(items);
       }
       (Event { kind: EventKind::End(i1), .. }, Some(Event { kind: EventKind::Begin(i2), .. })) if i1 == i2 => {
-        #[cfg(test)]
+        #[cfg(debug_assertions)]
         debug_assert_eq!(self._event_stack.pop().unwrap(), *i2);
 
         // delete buffer tail for Begin/End with no content
         self.events.pop();
       }
       _ => {
-        #[cfg(test)]
+        #[cfg(debug_assertions)]
         match &e {
           Event { kind: EventKind::Begin(id), .. } => self._event_stack.push(id.clone()),
           Event { kind: EventKind::End(actual), .. } => match self._event_stack.pop() {
