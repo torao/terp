@@ -11,3 +11,6 @@ rayon = "1.5"
 
 [dev-dependencies]
 itertools = "0.10"
+
+[features]
+parallel = []

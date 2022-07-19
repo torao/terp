@@ -129,11 +129,17 @@ where
     }
 
     while !evaluating.is_empty() {
-      let nexts = if evaluating.len() == 1 {
-        vec![Self::proceed_on_path(evaluating.pop().unwrap(), &self.buffer, eof)]
-      } else {
-        use rayon::prelude::*;
-        evaluating.par_drain(..).map(|path| Self::proceed_on_path(path, &self.buffer, eof)).collect::<Vec<_>>()
+      let nexts = {
+        #[cfg(feature = "parallel")]
+        if evaluating.len() == 1 {
+          vec![Self::proceed_on_path(evaluating.pop().unwrap(), &self.buffer, eof)]
+        } else {
+          use rayon::prelude::*;
+          evaluating.par_drain(..).map(|path| Self::proceed_on_path(path, &self.buffer, eof)).collect::<Vec<_>>()
+        }
+
+        #[cfg(not(feature = "parallel"))]
+        evaluating.drain(..).map(|path| Self::proceed_on_path(path, &self.buffer, eof)).collect::<Vec<_>>()
       };
 
       for next in nexts {
