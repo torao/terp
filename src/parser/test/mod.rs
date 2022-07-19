@@ -1,6 +1,6 @@
 use crate::parser::{error_unmatch_labels, Context, Event, EventBuffer, EventKind};
 use crate::schema::chars::{self, ascii_alphabetic, ascii_digit, one_of_tokens, token};
-use crate::schema::{Item, Location, Schema, Syntax};
+use crate::schema::{Location, Schema, Syntax};
 use crate::{Error, Result};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
@@ -462,43 +462,5 @@ impl<ID: Clone + Display + Debug + Eq + Eq + Hash> Events<ID> {
 impl<ID: Clone + Display + Debug + Eq + Eq + Hash> Default for Events<ID> {
   fn default() -> Self {
     Self::new()
-  }
-}
-
-#[allow(dead_code)]
-pub fn dump_context<ID, E: Item, H: FnMut(Event<ID, E>)>(parser: &Context<ID, E, H>)
-where
-  ID: Clone + Hash + Eq + Ord + Display + Debug,
-{
-  println!("Parser[{}]", parser.id);
-  println!("  Location: {}", parser.location);
-  println!("  Offset  : {}", parser.offset_of_buffer_head);
-  println!("  Buffer  : {}", E::debug_symbols(&parser.buffer));
-  print!("  Ongoing :");
-  if !parser.ongoing.is_empty() {
-    println!();
-    for s in parser.ongoing.iter().map(|p| p.current()) {
-      println!("    {:?}", s);
-    }
-  } else {
-    println!(" none");
-  }
-  print!("  Completed:");
-  if !parser.prev_completed.is_empty() {
-    println!();
-    for s in parser.prev_completed.iter().map(|p| p.current()) {
-      println!("    {:?}", s);
-    }
-  } else {
-    println!(" none");
-  }
-  print!("  Unmatched:");
-  if !parser.prev_unmatched.is_empty() {
-    println!();
-    for s in parser.prev_unmatched.iter().map(|p| p.current()) {
-      println!("    {:?}", s);
-    }
-  } else {
-    println!(" none");
   }
 }

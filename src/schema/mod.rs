@@ -120,7 +120,7 @@ impl Item for u8 {
   }
 }
 
-pub trait Location<E: Item>: Default + Copy + Display + Debug + PartialEq {
+pub trait Location<E: Item>: Default + Copy + Display + Debug + PartialEq + Send + Sync {
   fn position(&self) -> u64;
 
   fn increment_with(&mut self, item: E);
@@ -150,7 +150,7 @@ impl<ID, E: 'static + Item> Syntax<ID, E> {
     Syntax::with_primary(Primary::Alias(id))
   }
 
-  pub fn from_fn<FN: Fn(&[E]) -> Result<E, MatchResult> + 'static>(label: &str, f: FN) -> Self {
+  pub fn from_fn<FN: Fn(&[E]) -> Result<E, MatchResult> + Send + Sync + 'static>(label: &str, f: FN) -> Self {
     Syntax::with_primary(Primary::Term(label.to_string(), Box::new(f)))
   }
 
@@ -356,7 +356,7 @@ pub(crate) const OP_CONCAT: &str = ",";
 pub(crate) const OP_CHOICE: &str = " |";
 
 pub(crate) enum Primary<ID, E: Item> {
-  Term(String, Box<dyn Fn(&[E]) -> Result<E, MatchResult>>),
+  Term(String, Box<dyn Fn(&[E]) -> Result<E, MatchResult> + Send + Sync>),
   Alias(ID),
   Seq(Vec<Syntax<ID, E>>),
   Or(Vec<Syntax<ID, E>>),

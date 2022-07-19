@@ -245,23 +245,3 @@ fn rfc8259_string_ignore_chars() {
     .end()
     .assert_eq(&events);
 }
-
-/*
-extern crate test;
-
-#[bench]
-fn rfc8259_schema_build(b: &mut test::Bencher) {
-  b.iter(|| self::schema());
-}
-
-#[bench]
-fn rfc8259_sample_wikipedia(b: &mut test::Bencher) {
-  let schema = self::schema();
-  b.iter(|| {
-    let event_handler = |_: Event<ID, char>| ();
-    let mut parser = Context::new(&schema, ID::JsonText, event_handler).unwrap();
-    parser.push_str(SAMPLE).unwrap();
-    parser.finish().unwrap();
-  });
-}
-*/
