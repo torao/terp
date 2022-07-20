@@ -24,4 +24,11 @@ fn error_multiple() {
   location.increment_with_seq(&"hello\nworld".chars().collect::<Vec<_>>());
   let err2 = Error::<char>::Unmatched { location, expected: String::default(), actual: String::default() };
   assert!(matches!(Error::errors::<char>(vec![err1, err2]), Err(Error::Multi(..))));
+
+  // duplicated errros are removed
+  let location = Location::default();
+  let err = Error::<char>::Unmatched { location, expected: String::default(), actual: String::default() };
+  let err1 = err.clone();
+  let err2 = err.clone();
+  assert_eq!(Error::errors::<char>(vec![err1, err2]), Err(err));
 }
