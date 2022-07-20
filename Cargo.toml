@@ -7,10 +7,10 @@ edition = "2021"
 
 [dependencies]
 thiserror = "1.0.24"
-rayon = "1.5"
+rayon = { version = "1.5", optional = true }
 
 [dev-dependencies]
 itertools = "0.10"
 
 [features]
-parallel = []
+parallel = ["dep:rayon"]
