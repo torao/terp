@@ -56,20 +56,31 @@ where
   }
 
   pub fn push(&mut self, item: E) -> Result<E, ()> {
-    debug!("PUSH: {:?}, buf_size={}", item, self.buffer.len());
+    let buffer = [item];
+    self.push_seq(&buffer)
+  }
+
+  pub fn push_seq(&mut self, items: &[E]) -> Result<E, ()> {
+    debug!("PUSH: {:?}, buf_size={}", E::debug_symbols(items), self.buffer.len());
     for (i, path) in self.ongoing.iter().enumerate() {
       debug!("  ONGOING[{}]: {}", i, path)
     }
 
-    self.check_error(false, Some(item))?;
+    self.check_for_error_whether_impossible_to_proceed(items)?;
 
-    // add item into buffer
-    self.buffer.push(item);
-    self.location.increment_with(item);
+    // append items into buffer
+    if items.is_empty() {
+      return Ok(());
+    }
+    self.buffer.reserve(items.len());
+    for item in items {
+      self.buffer.push(*item);
+    }
+    self.location.increment_with_seq(items);
 
     self.proceed(false)?;
 
-    self.check_error(false, None)?;
+    self.check_for_error_whether_unmatch_confirmed()?;
 
     if self.ongoing.len() == 1 && self.prev_completed.is_empty() {
       self.ongoing[0].events_flush_to(&mut self.event_handler);
@@ -86,8 +97,6 @@ where
   pub fn finish(mut self) -> Result<E, ()> {
     debug!("FINISH");
 
-    self.check_error(true, None)?;
-
     while !self.ongoing.is_empty() {
       self.proceed(true)?;
     }
@@ -101,7 +110,7 @@ where
 
         Ok(())
       }
-      0 => self.check_error(true, None),
+      0 => self.error_unmatched_with_eof(),
       _ => {
         let mut expecteds = Vec::with_capacity(self.prev_completed.len());
         let mut repr_actual = String::new();
@@ -207,7 +216,7 @@ where
       }
       (false, _) => next.unmatched = Some(path),
     }
-    return Ok(next);
+    Ok(next)
   }
 
   fn move_ongoing_paths_to_next_term(path: Path<'s, ID, E>) -> Result<E, Vec<Path<'s, ID, E>>> {
@@ -259,32 +268,36 @@ where
     }
   }
 
-  fn check_error(&self, eof: bool, item: Option<E>) -> Result<E, ()> {
-    if self.ongoing.is_empty() {
-      return if !self.prev_completed.is_empty() {
-        if item.is_some() {
-          Err(self.error_unmatch_with_eof(None, item))
-        } else {
-          Ok(())
-        }
-      } else if !self.prev_unmatched.is_empty() {
-        let errors = self
-          .prev_unmatched
-          .iter()
-          .map(|p| {
-            if eof {
-              self.error_unmatch_with_eof(Some(p.current()), None)
-            } else {
-              self.error_unmatch(Some(p.current()))
-            }
-          })
-          .collect::<Vec<_>>();
-        Error::errors(errors)
+  fn check_for_error_whether_impossible_to_proceed(&self, items: &[E]) -> Result<E, ()> {
+    debug_assert!(!self.ongoing.is_empty() || !self.prev_completed.is_empty() || !self.prev_unmatched.is_empty());
+    if !items.is_empty() && self.ongoing.is_empty() {
+      if !self.prev_completed.is_empty() {
+        // `items` appeared, but the parser state was already complete and waiting for EOF
+        Err(self.error_unmatch_with_eof(None, items.first().copied()))
       } else {
-        unreachable!("There is no outgoing or confirmed state");
-      };
+        // if unmatch has already been confirmed but the application has attempted to make a further push
+        self.check_for_error_whether_unmatch_confirmed()
+      }
+    } else {
+      Ok(())
     }
-    Ok(())
+  }
+
+  fn check_for_error_whether_unmatch_confirmed(&self) -> Result<E, ()> {
+    debug_assert!(!self.ongoing.is_empty() || !self.prev_completed.is_empty() || !self.prev_unmatched.is_empty());
+    if self.ongoing.is_empty() && self.prev_completed.is_empty() {
+      let errors = self.prev_unmatched.iter().map(|p| self.error_unmatch(Some(p.current()))).collect::<Vec<_>>();
+      Error::errors(errors)
+    } else {
+      Ok(())
+    }
+  }
+
+  fn error_unmatched_with_eof(&self) -> Result<E, ()> {
+    debug_assert!(self.ongoing.is_empty() && self.prev_completed.is_empty() && !self.prev_unmatched.is_empty());
+    let errors =
+      self.prev_unmatched.iter().map(|p| self.error_unmatch_with_eof(Some(p.current()), None)).collect::<Vec<_>>();
+    Error::errors(errors)
   }
 
   fn fit_buffer_to_min_size(&mut self) {
@@ -334,12 +347,7 @@ fn error_unmatch_labels<E: Item>(
   const ELPS_LEN: usize = 3;
   const EOF_SYMBOL: &str = "EOF";
   debug_assert!(expected.is_some() || actual.is_some());
-  debug_assert!(
-    expected.as_ref().map(|x| x.0 <= buffer.len()).unwrap_or(true),
-    "buffer overrun: {} > {}",
-    expected.as_ref().unwrap().0,
-    buffer.len()
-  );
+  debug_assert!(expected.as_ref().map(|x| x.0 <= buffer.len()).unwrap_or(true));
 
   let smpl_len = E::SAMPLING_UNIT_AT_ERROR;
   let sampling_end = expected.as_ref().map(|(begin, _)| *begin).unwrap_or(buffer.len());
@@ -371,10 +379,7 @@ where
   ID: 's + Clone + Hash + Eq + Ord + Display + Debug + Send + Sync,
 {
   pub fn push_str(&mut self, s: &str) -> Result<char, ()> {
-    for ch in s.chars() {
-      self.push(ch)?;
-    }
-    Ok(())
+    self.push_seq(&s.chars().collect::<Vec<_>>())
   }
 }
 

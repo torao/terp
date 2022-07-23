@@ -1,3 +1,5 @@
+use itertools::Itertools;
+
 use crate::parser::{error_unmatch_labels, Context, Event, EventBuffer, EventKind};
 use crate::schema::chars::{self, ascii_alphabetic, ascii_digit, one_of_tokens, token};
 use crate::schema::{Location, Schema, Syntax};
@@ -19,6 +21,35 @@ fn event() {
     assert_eq!(event, event.clone());
     let _ = format!("{:?}", event);
   }
+}
+
+#[test]
+#[should_panic]
+fn event_buffer_inconsist_begin_end() {
+  let location = chars::Location::default();
+  let mut events = EventBuffer::new(1);
+  for kind in
+    vec![EventKind::Begin("FOO"), EventKind::Fragments("XYZ".chars().collect::<Vec<_>>()), EventKind::End("BAR")]
+  {
+    let event = Event { location, kind };
+    events.push(event);
+  }
+}
+
+#[test]
+fn event_buffer_equivalence_when_diffferent_event() {
+  let location1 = chars::Location::default();
+  let mut location2 = chars::Location::default();
+  location2.increment_with('\n');
+  let mut events1 = EventBuffer::new(1);
+  let mut events2 = EventBuffer::new(1);
+  for kind in
+    vec![EventKind::Begin("FOO"), EventKind::Fragments("XYZ".chars().collect::<Vec<_>>()), EventKind::End("FOO")]
+  {
+    events1.push(Event { location: location1, kind: kind.clone() });
+    events2.push(Event { location: location2, kind: kind.clone() });
+  }
+  assert_ne!(events1, events2);
 }
 
 #[test]
@@ -357,6 +388,30 @@ fn context_one_of_tokens() {
   }
 }
 
+#[test]
+fn context_push_seq() {
+  let a = ascii_digit() * 3;
+  let schema = Schema::new("Foo").define("A", a);
+
+  for splitted_sample in combination_div("012") {
+    let mut events = Vec::new();
+    let handler = |e: Event<_, _>| events.push(e);
+    let mut parser = Context::new(&schema, "A", handler).unwrap();
+    for fragment in splitted_sample {
+      parser.push_str(&fragment).unwrap();
+    }
+    parser.finish().unwrap();
+    Events::new().begin("A").fragments("012").end().assert_eq(&events);
+  }
+
+  let mut events = Vec::new();
+  let handler = |e: Event<_, _>| events.push(e);
+  let mut parser = Context::new(&schema, "A", handler).unwrap();
+  parser.push_seq(&[]).unwrap(); // empty sequence
+  parser.push_str("012").unwrap();
+  assert_unmatch(parser.push_str("3"), location(3, 0, 3), "012[EOF]", "012['3']");
+}
+
 fn assert_unmatch<T: Debug>(r: Result<char, T>, l: chars::Location, e: &str, a: &str) {
   if let Err(Error::<char>::Unmatched { location, expected, actual }) = &r {
     assert_eq!((l, e, a), (*location, expected.as_str(), actual.as_str()));
@@ -405,6 +460,44 @@ fn assert_events_eq<ID: Clone + Display + Debug + Eq + Eq + Hash>(
   for i in 0..len {
     assert_eq!(expected.get(i), actual.get(i), "unexpected event @{}:\n  {:?}\n  {:?}", i, expected, actual);
   }
+}
+
+fn combination_div(s: &str) -> Vec<Vec<String>> {
+  let chars = s.chars().collect::<Vec<_>>();
+  let mut result = Vec::new();
+  for divs in combination_sum(chars.len()) {
+    for divs_len in divs.iter().permutations(divs.len()) {
+      let mut offset = 0;
+      let mut splitted = Vec::with_capacity(divs.len());
+      for len in divs_len {
+        splitted.push(chars[offset..offset + len].iter().collect::<String>());
+        offset += len;
+      }
+      result.push(splitted);
+    }
+  }
+  let result = result.into_iter().unique().collect::<Vec<_>>();
+  println!("combination_div({:?}) = {:?}", s, result);
+  result
+}
+
+fn combination_sum(sum: usize) -> Vec<Vec<usize>> {
+  fn _cs(target: usize, nums: &[usize], curr: &mut Vec<usize>, result: &mut Vec<Vec<usize>>) {
+    if target == 0 {
+      result.push(curr.clone());
+      return;
+    } else if nums.is_empty() {
+      return;
+    } else if target >= nums[0] {
+      curr.push(nums[0]);
+      _cs(target - nums[0], nums, curr, result);
+      curr.pop();
+    }
+    _cs(target, &nums[1..], curr, result);
+  }
+  let mut result = Vec::new();
+  _cs(sum, &(1..=sum).collect::<Vec<_>>(), &mut Vec::new(), &mut result);
+  result
 }
 
 fn normalize<ID: Clone + Display + Debug + Eq + Eq + Hash>(events: &[Event<ID, char>]) -> Vec<Event<ID, char>> {
