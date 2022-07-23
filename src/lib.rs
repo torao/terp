@@ -9,9 +9,9 @@ mod test;
 #[cfg(debug_assertions)]
 #[macro_export]
 macro_rules! debug {
-  () => { eprintln!("[{}:{:3}]", file!(), line!()) };
-  ($fmt:expr) => {{ eprintln!("[{}:{:3}] {}", file!(), line!(), $fmt) }};
-  ($fmt:expr, $($arg:tt)*) => {{ let s = format!($fmt, $($arg)*); eprintln!("[{}:{:3}] {}", file!(), line!(), s); }};
+  () => { eprintln!("[{:20}:{:3}]", file!(), line!()) };
+  ($fmt:expr) => {{ eprintln!("[{:20}:{:3}] {}", file!(), line!(), $fmt) }};
+  ($fmt:expr, $($arg:tt)*) => {{ let s = format!($fmt, $($arg)*); eprintln!("[{:20}:{:3}] {}", file!(), line!(), s); }};
 }
 
 #[cfg(not(debug_assertions))]
