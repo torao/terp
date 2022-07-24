@@ -2,7 +2,7 @@ use crate::parser::test::Events;
 use crate::parser::{Context, Event};
 use crate::schema::json::{schema, ID};
 
-const SAMPLE_WIKIPEDIA: &str = r#"
+pub const SAMPLE_WIKIPEDIA: &str = r#"
 {
   "Image": {
       "Width":  800,

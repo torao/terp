@@ -12,9 +12,11 @@ Cargo.lock
 
 # Added by cargo
 
-/target
+target/
 /.vscode
 /.history
 
-# grcov
-/prof
+# perf
+*.data
+*.old
+*_data.txt
