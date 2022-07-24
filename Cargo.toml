@@ -13,4 +13,5 @@ rayon = { version = "1.5", optional = true }
 itertools = "0.10"
 
 [features]
-parallel = ["dep:rayon"]
+default = []
+parallel = ["rayon"]

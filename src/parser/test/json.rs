@@ -42,9 +42,7 @@ fn rfc8259_sample() {
     ID::Int,
     ID::Value,
   ]);
-  for ch in SAMPLE_WIKIPEDIA.chars() {
-    parser.push(ch).unwrap();
-  }
+  parser.push_str(SAMPLE_WIKIPEDIA).unwrap();
   parser.finish().unwrap();
   for (i, e) in events.iter().enumerate() {
     eprintln!("[{}] {}: {:?}", i, e.location, e.kind)
@@ -186,9 +184,7 @@ fn rfc8259_string() {
   };
   let schema = self::schema();
   let mut parser = Context::new(&schema, ID::String, event_handler).unwrap();
-  for ch in sample.chars() {
-    parser.push(ch).unwrap();
-  }
+  parser.push_str(sample).unwrap();
   parser.finish().unwrap();
   Events::new()
     .begin(ID::String)
@@ -229,9 +225,7 @@ fn rfc8259_string_ignore_chars() {
   let schema = self::schema();
   let mut parser =
     Context::new(&schema, ID::String, event_handler).unwrap().ignore_events_for(&[ID::Unescaped, ID::Char]);
-  for ch in sample.chars() {
-    parser.push(ch).unwrap();
-  }
+  parser.push_str(sample).unwrap();
   parser.finish().unwrap();
   Events::new()
     .begin(ID::String)

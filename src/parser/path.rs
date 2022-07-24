@@ -14,8 +14,10 @@ where
   stack: Vec<StackFrame<'s, ID, E>>,
 
   // For variable watch during step execution.
-  #[cfg(test)]
+  #[cfg(debug_assertions)]
   _debug: String,
+  #[cfg(debug_assertions)]
+  _eval: String,
 }
 
 impl<'s, ID, E: Item> Path<'s, ID, E>
@@ -30,8 +32,10 @@ where
       schema,
       event_buffer,
       stack,
-      #[cfg(test)]
+      #[cfg(debug_assertions)]
       _debug: String::from(""),
+      #[cfg(debug_assertions)]
+      _eval: String::from(""),
     };
     path.stack_push_alias(id)?;
     Ok(path)
@@ -95,6 +99,23 @@ where
     (matched, true)
   }
 
+  #[inline]
+  pub fn matches(&mut self, buffer: &[E], eof: bool) -> Result<E, Matching<ID, E>> {
+    let result = self.current_mut().matches(buffer, eof);
+    #[cfg(debug_assertions)]
+    {
+      self._eval = format!(
+        "{}(\"{}\") => {:?}",
+        self.current().syntax(),
+        E::debug_symbols(
+          &buffer[self.current().match_begin..std::cmp::min(buffer.len(), self.current().match_begin + 8)]
+        ),
+        result.as_ref().ok().map(|r| format!("{:?}", r)).unwrap_or_else(|| String::from("ERR"))
+      );
+    }
+    result
+  }
+
   pub fn completed(&mut self) {
     self.stack_pop(self.stack.len() - 1);
     debug_assert!(self.stack.len() == 1);
@@ -134,7 +155,7 @@ where
       sf.state.match_begin = self.current().match_begin;
     }
     self.stack.push(sf);
-    #[cfg(test)]
+    #[cfg(debug_assertions)]
     {
       self._debug = self.to_string();
     }
@@ -152,7 +173,7 @@ where
       self.current_mut().match_begin = state.match_begin;
       self.current_mut().location = state.location;
     }
-    #[cfg(test)]
+    #[cfg(debug_assertions)]
     {
       self._debug = self.to_string();
     }
@@ -275,7 +296,7 @@ where
     self.syntax
   }
 
-  pub fn matches(&mut self, buffer: &[E], eof: bool) -> Result<E, Matching<ID, E>> {
+  fn matches(&mut self, buffer: &[E], eof: bool) -> Result<E, Matching<ID, E>> {
     debug_assert!(buffer.len() >= self.match_begin + self.match_length);
 
     let items = &buffer[self.match_begin..];
@@ -341,6 +362,7 @@ where
   }
 }
 
+#[derive(Debug)]
 pub enum Matching<ID, E: Item>
 where
   ID: Clone + Display + Debug + PartialEq + Eq + Hash,

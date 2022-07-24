@@ -162,6 +162,7 @@ where
           self.prev_completed.push(completed);
         }
       }
+      Self::merge_paths(&mut evaluating);
     }
 
     Self::merge_paths(&mut self.ongoing);
@@ -172,7 +173,13 @@ where
 
   fn proceed_on_path(mut path: Path<'s, ID, E>, buffer: &[E], eof: bool) -> Result<E, NextPaths<'s, ID, E>> {
     debug_assert!(matches!(path.current().syntax().primary, Primary::Term(..)));
-    debug!("~ === {}", path);
+    debug!(
+      "~ === proceed_on_path({}, {}, {}): {}",
+      path,
+      E::debug_symbols(buffer),
+      eof,
+      if cfg!(feature = "parallel") { "parallel" } else { "serial" }
+    );
 
     let mut next = NextPaths {
       need_to_be_reevaluated: Vec::with_capacity(1),
@@ -181,7 +188,7 @@ where
       completed: None,
     };
 
-    let matched = match path.current_mut().matches(buffer, eof)? {
+    let matched = match path.matches(buffer, eof)? {
       Matching::Match(_length, event) => {
         if let Some(event) = event {
           path.events_push(event);
