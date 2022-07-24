@@ -19,5 +19,4 @@ target/
 # perf
 *.data
 *.old
-*.svg
 *_data.txt

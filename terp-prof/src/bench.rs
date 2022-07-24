@@ -1,10 +1,10 @@
 extern crate test;
-use terp::parser::{Context, Event};
-use terp::schema::json::{schema, ID};
-use terp::schema::Schema;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use terp::parser::{Context, Event};
+use terp::schema::json::{schema, ID};
+use terp::schema::Schema;
 
 pub const SAMPLE_WIKIPEDIA: &str = r#"
 {
@@ -55,8 +55,8 @@ fn various_json_files(b: &mut test::Bencher) {
 
 fn naive_rfc8259_schema() -> Schema<ID, char> {
   use terp::schema::chars::*;
-  use terp::schema::*;
   use terp::schema::json::ID::*;
+  use terp::schema::*;
   Schema::new("JSON")
     .define(JsonText, id(WS) & id(Value) & id(WS))
     .define(BeginArray, id(WS) & ch('['))
