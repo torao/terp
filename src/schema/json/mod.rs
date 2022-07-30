@@ -50,7 +50,7 @@ pub fn schema() -> Schema<ID, char> {
   use ID::*;
   Schema::new("JSON")
     .define(JsonText, id(WS) & id(Value) & id(WS))
-    .define(BeginArray, id(WS) & ch('['))
+    .define(BeginArray, id(WS) & ch('[') & id(WS))
     .define(BeginObject, id(WS) & ch('{') & id(WS))
     .define(EndArray, id(WS) & ch(']') & id(WS))
     .define(EndObject, id(WS) & ch('}') & id(WS))
