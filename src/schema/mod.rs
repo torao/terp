@@ -1,6 +1,7 @@
 use crate::Result;
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Display};
+use std::hash::Hash;
 use std::marker::Send;
 use std::ops::{BitAnd, BitOr, Mul, RangeFrom, RangeInclusive, RangeTo, RangeToInclusive};
 
@@ -84,7 +85,7 @@ impl<ID: Debug, E: Item> Debug for Schema<ID, E> {
   }
 }
 
-pub trait Item: 'static + Copy + Clone + Send + Sync + PartialEq + Eq + Display + Debug {
+pub trait Item: 'static + Copy + Clone + Send + Sync + Hash + PartialEq + Eq + Display + Debug {
   type Location: Location<Self>;
 
   /// The number of items to be restored from the buffer for error messages. A maximum of 3 units and two three-point
@@ -101,7 +102,7 @@ pub trait Item: 'static + Copy + Clone + Send + Sync + PartialEq + Eq + Display 
 
 impl Item for char {
   type Location = chars::Location;
-  const SAMPLING_UNIT_AT_ERROR: usize = 8;
+  const SAMPLING_UNIT_AT_ERROR: usize = 12;
 
   fn debug_symbol(value: Self) -> String {
     format!("{:?}", value)
@@ -120,7 +121,7 @@ impl Item for u8 {
   }
 }
 
-pub trait Location<E: Item>: Default + Copy + Display + Debug + PartialEq + Send + Sync {
+pub trait Location<E: Item>: Default + Copy + Display + Debug + Ord + PartialEq + Send + Sync {
   fn position(&self) -> u64;
 
   fn increment_with(&mut self, item: E);

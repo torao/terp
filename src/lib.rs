@@ -28,32 +28,18 @@ pub type Result<E, T> = std::result::Result<T, Error<E>>;
 
 #[derive(thiserror::Error, Clone, Debug, PartialEq, Eq)]
 pub enum Error<E: Item> {
-  #[error("{location} {expected} expected, but {actual} appeared")]
-  Unmatched { location: E::Location, expected: String, actual: String },
-  #[error("multiple syntax matches were found")]
-  MultipleMatches { location: E::Location, expecteds: Vec<String>, actual: String },
-  #[error("{0:?}")]
-  Multi(Vec<Error<E>>),
+  #[error("{location} {prefix}{expecteds:?} expected, but {prefix}{actual} appeared")]
+  Unmatched {
+    location: E::Location,
+    prefix: String,
+    expecteds: Vec<String>,
+    expected_syntaxes: Vec<String>,
+    actual: String,
+  },
+  #[error("{location} multiple syntax matches were found")]
+  MultipleMatches { location: E::Location, prefix: String, expecteds: Vec<String>, actual: String },
   #[error("{0}")]
   UndefinedID(String),
-}
-
-impl<E: Item> Error<E> {
-  pub fn errors<T>(mut errors: Vec<Error<E>>) -> Result<E, T> {
-    // remove duplicate errors
-    let mut i = 0;
-    while i < errors.len() {
-      if errors[0..i].iter().any(|e| e == &errors[i]) {
-        errors.remove(i);
-      } else {
-        i += 1;
-      }
-    }
-
-    if errors.len() == 1 {
-      Err(errors.remove(0))
-    } else {
-      Err(Error::Multi(errors))
-    }
-  }
+  #[error("the previous error prevented progress")]
+  Previous,
 }

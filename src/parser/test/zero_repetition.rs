@@ -41,7 +41,7 @@ fn context_zero_repetition_option() {
   let mut events = Vec::new();
   let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
-  assert_unmatch(parser.push('X'), location(0, 0, 0), "[ASCII_DIGIT?]", "['X']");
+  assert_unmatch(parser.push('X'), location(0, 0, 0), "", "[ASCII_DIGIT?]", "['X']...");
 }
 
 #[test]
@@ -64,13 +64,13 @@ fn context_zero_repetition_precedes() {
   let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('9').unwrap();
-  assert_unmatch(parser.finish(), location(1, 0, 1), "9[ASCII_ALPHA]", "9[EOF]");
+  assert_unmatch(parser.finish(), location(1, 0, 1), "9", "[ASCII_ALPHA]", "[EOF]");
 
   let mut events = Vec::new();
   let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('9').unwrap();
-  assert_unmatch(parser.push('8'), location(1, 0, 1), "9[ASCII_ALPHA]", "9['8']");
+  assert_unmatch(parser.push('8'), location(1, 0, 1), "9", "[ASCII_ALPHA]", "['8']...");
 }
 
 #[test]
@@ -92,13 +92,13 @@ fn context_zero_repetition_trailing() {
   let mut events = Vec::new();
   let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
-  assert_unmatch(parser.push('9'), location(0, 0, 0), "[ASCII_ALPHA]", "['9']");
+  assert_unmatch(parser.push('9'), location(0, 0, 0), "", "[ASCII_ALPHA]", "['9']...");
 
   let mut events = Vec::new();
   let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('X').unwrap();
-  assert_unmatch(parser.push('Y'), location(1, 0, 1), "X[ASCII_DIGIT?]", "X['Y']");
+  assert_unmatch(parser.push('Y'), location(1, 0, 1), "X", "[ASCII_DIGIT?]", "['Y']...");
 }
 
 #[test]
@@ -120,19 +120,19 @@ fn context_zero_repetition_sequence() {
   let mut events = Vec::new();
   let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
-  assert_unmatch(parser.push('!'), location(0, 0, 0), "[ASCII_ALPHA?]", "['!']");
+  assert_unmatch(parser.push('!'), location(0, 0, 0), "", "[ASCII_ALPHA?]", "['!']...");
 
   let mut events = Vec::new();
   let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('9').unwrap();
-  assert_unmatch(parser.push('!'), location(1, 0, 1), "9[ASCII_ALPHA?]", "9['!']");
+  assert_unmatch(parser.push('!'), location(1, 0, 1), "9", "[ASCII_ALPHA?]", "['!']...");
 
   let mut events = Vec::new();
   let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('Z').unwrap();
-  assert_unmatch(parser.push('!'), location(1, 0, 1), "Z[EOF]", "Z['!']");
+  assert_unmatch(parser.push('!'), location(1, 0, 1), "Z", "[EOF]", "['!']...");
 }
 
 #[test]
@@ -155,21 +155,21 @@ fn context_zero_repetition_injected() {
   let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('A').unwrap();
-  assert_unmatch(parser.push('!'), location(1, 0, 1), "A[ASCII_ALPHA]", "A['!']");
+  assert_unmatch(parser.push('!'), location(1, 0, 1), "A", "[ASCII_ALPHA]", "['!']...");
 
   let mut events = Vec::new();
   let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('A').unwrap();
   parser.push('0').unwrap();
-  assert_unmatch(parser.push('!'), location(2, 0, 2), "A0[ASCII_ALPHA]", "A0['!']");
+  assert_unmatch(parser.push('!'), location(2, 0, 2), "A0", "[ASCII_ALPHA]", "['!']...");
 
   let mut events = Vec::new();
   let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('A').unwrap();
   parser.push('0').unwrap();
-  assert_unmatch(parser.push('1'), location(2, 0, 2), "A0[ASCII_ALPHA]", "A0['1']");
+  assert_unmatch(parser.push('1'), location(2, 0, 2), "A0", "[ASCII_ALPHA]", "['1']...");
 }
 
 #[test]
@@ -191,58 +191,50 @@ fn context_zero_repetition_caught_between() {
   let mut events = Vec::new();
   let handler = |e: Event<_, _>| events.push(e);
   let parser = Context::new(&schema, "A", handler).unwrap();
-  assert_unmatch(parser.finish(), location(0, 0, 0), "[ASCII_ALPHA]", "[EOF]");
+  assert_unmatch(parser.finish(), location(0, 0, 0), "", "[ASCII_ALPHA]", "[EOF]");
 
   let mut events = Vec::new();
   let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
-  assert_unmatch(parser.push('!'), location(0, 0, 0), "[ASCII_ALPHA]", "['!']");
-
-  let mut events = Vec::new();
-  let handler = |e: Event<_, _>| events.push(e);
-  let mut parser = Context::new(&schema, "A", handler).unwrap();
-  parser.push('0').unwrap();
-  assert_unmatch(parser.finish(), location(1, 0, 1), "0[ASCII_ALPHA]", "0[EOF]");
+  assert_unmatch(parser.push('!'), location(0, 0, 0), "", "[ASCII_ALPHA]", "['!']...");
 
   let mut events = Vec::new();
   let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('0').unwrap();
-  assert_unmatch(parser.push('1'), location(1, 0, 1), "0[ASCII_ALPHA]", "0['1']");
+  assert_unmatch(parser.finish(), location(1, 0, 1), "0", "[ASCII_ALPHA]", "[EOF]");
 
   let mut events = Vec::new();
   let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('0').unwrap();
-  assert_unmatch(parser.push('!'), location(1, 0, 1), "0[ASCII_ALPHA]", "0['!']");
+  assert_unmatch(parser.push('1'), location(1, 0, 1), "0", "[ASCII_ALPHA]", "['1']...");
 
   let mut events = Vec::new();
   let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('0').unwrap();
-  assert_unmatch(parser.push('1'), location(1, 0, 1), "0[ASCII_ALPHA]", "0['1']");
+  assert_unmatch(parser.push('!'), location(1, 0, 1), "0", "[ASCII_ALPHA]", "['!']...");
 
   let mut events = Vec::new();
   let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('0').unwrap();
-  parser.push('A').unwrap();
-  assert_unmatch(parser.push('B'), location(2, 0, 2), "0A[ASCII_DIGIT?]", "0A['B']");
+  assert_unmatch(parser.push('1'), location(1, 0, 1), "0", "[ASCII_ALPHA]", "['1']...");
 
   let mut events = Vec::new();
   let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('0').unwrap();
   parser.push('A').unwrap();
-  assert_unmatch(parser.push('!'), location(2, 0, 2), "0A[ASCII_DIGIT?]", "0A['!']");
+  assert_unmatch(parser.push('B'), location(2, 0, 2), "0A", "[ASCII_DIGIT?]", "['B']...");
 
   let mut events = Vec::new();
   let handler = |e: Event<_, _>| events.push(e);
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('0').unwrap();
   parser.push('A').unwrap();
-  parser.push('1').unwrap();
-  assert_unmatch(parser.push('2'), location(3, 0, 3), "0A1[EOF]", "0A1['2']");
+  assert_unmatch(parser.push('!'), location(2, 0, 2), "0A", "[ASCII_DIGIT?]", "['!']...");
 
   let mut events = Vec::new();
   let handler = |e: Event<_, _>| events.push(e);
@@ -250,5 +242,13 @@ fn context_zero_repetition_caught_between() {
   parser.push('0').unwrap();
   parser.push('A').unwrap();
   parser.push('1').unwrap();
-  assert_unmatch(parser.push('!'), location(3, 0, 3), "0A1[EOF]", "0A1['!']");
+  assert_unmatch(parser.push('2'), location(3, 0, 3), "0A1", "[EOF]", "['2']...");
+
+  let mut events = Vec::new();
+  let handler = |e: Event<_, _>| events.push(e);
+  let mut parser = Context::new(&schema, "A", handler).unwrap();
+  parser.push('0').unwrap();
+  parser.push('A').unwrap();
+  parser.push('1').unwrap();
+  assert_unmatch(parser.push('!'), location(3, 0, 3), "0A1", "[EOF]", "['!']...");
 }

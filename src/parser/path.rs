@@ -132,7 +132,10 @@ where
       return false;
     }
     for i in (0..self.stack.len()).rev() {
-      if self.stack[i].state.syntax().id != other.stack[i].state.syntax().id {
+      if self.stack[i].state.syntax().id != other.stack[i].state.syntax().id
+        || self.stack[i].state.appearances != other.stack[i].state.appearances
+        || self.stack[i].state.location != other.stack[i].state.location
+      {
         return false;
       }
     }
