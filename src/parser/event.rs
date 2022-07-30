@@ -6,7 +6,7 @@ use std::{
 
 use crate::schema::Item;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Event<ID, E: Item>
 where
   ID: Clone + Display + Debug + PartialEq + Eq + Hash,
@@ -17,7 +17,7 @@ where
 
 impl<ID, E: Item> Event<ID, E> where ID: Clone + Display + Debug + PartialEq + Eq + Hash {}
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum EventKind<ID, E: Item>
 where
   ID: Clone + Debug,
@@ -51,6 +51,10 @@ where
       #[cfg(debug_assertions)]
       _event_stack: Vec::with_capacity(16),
     }
+  }
+
+  pub fn len(&self) -> usize {
+    self.events.len()
   }
 
   pub fn ignore_events_for(&mut self, ids: &[ID]) {
@@ -103,10 +107,20 @@ where
     self
   }
 
-  pub fn flush_to<H: FnMut(Event<ID, E>)>(&mut self, handler: &mut H) {
-    for e in self.events.drain(..) {
+  pub fn flush_to<H: FnMut(Event<ID, E>)>(&mut self, n: usize, handler: &mut H) {
+    for e in self.events.drain(..n) {
       (handler)(e);
     }
+  }
+
+  pub fn forward_matching_length(&self, other: &Self) -> usize {
+    let len = std::cmp::min(self.events.len(), other.events.len());
+    for i in 0..len {
+      if self.events[i] != other.events[i] {
+        return i;
+      }
+    }
+    len
   }
 }
 

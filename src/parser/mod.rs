@@ -88,12 +88,8 @@ where
 
     self.proceed(false)?;
 
+    self.deliver_confirmed_events();
 
-    if self.ongoing.len() == 1 && self.prev_completed.is_empty() {
-      self.ongoing[0].events_flush_to(&mut self.event_handler);
-    } else if self.ongoing.is_empty() && self.prev_completed.len() == 1 {
-      self.prev_completed[0].events_flush_to(&mut self.event_handler);
-    }
     self.check_whether_unmatch_confirmed()?;
 
     // reduce internal buffer if possible
@@ -115,8 +111,8 @@ where
       1 => {
         // notify all remaining events and success
         self.prev_completed[0].completed();
-        self.prev_completed[0].events_push(Event { location: self.location, kind: EventKind::End(self.id) });
-        self.prev_completed[0].events_flush_to(&mut self.event_handler);
+        self.prev_completed[0].events_push(Event { location: self.location, kind: EventKind::End(self.id.clone()) });
+        self.deliver_confirmed_events();
 
         Ok(())
       }
@@ -258,6 +254,25 @@ where
     debug_assert!(!term_reached.is_empty());
     debug_assert!(term_reached.iter().all(|t| matches!(t.current().syntax().primary, Primary::Term(..))));
     Ok(term_reached)
+  }
+
+  fn deliver_confirmed_events(&mut self) {
+    let mut actives = self.ongoing.iter_mut().chain(self.prev_completed.iter_mut()).collect::<Vec<_>>();
+    if actives.len() == 1 {
+      actives[0].events_flush_all_to(&mut self.event_handler);
+    } else if !actives.is_empty() {
+      let mut matches = actives[0].event_buffer().len();
+      for i in 1..actives.len() {
+        let len = actives[0].events_forward_matching_length(actives[i]);
+        matches = std::cmp::min(matches, len);
+      }
+      if matches > 0 {
+        actives[0].events_flush_forward_to(matches, &mut self.event_handler);
+        for active in actives.iter_mut().skip(1) {
+          active.events_flush_forward_to(matches, &mut |_| {});
+        }
+      }
+    }
   }
 
   fn merge_paths(paths: &mut Vec<Path<ID, E>>) {
