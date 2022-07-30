@@ -49,6 +49,10 @@ where
     &mut self.stack.last_mut().unwrap().state
   }
 
+  pub fn event_buffer(&self) -> &EventBuffer<ID, E> {
+    &self.event_buffer
+  }
+
   pub fn event_buffer_mut(&mut self) -> &mut EventBuffer<ID, E> {
     &mut self.event_buffer
   }
@@ -132,7 +136,10 @@ where
       return false;
     }
     for i in (0..self.stack.len()).rev() {
-      if self.stack[i].state.syntax().id != other.stack[i].state.syntax().id {
+      if self.stack[i].state.syntax().id != other.stack[i].state.syntax().id
+        || self.stack[i].state.appearances != other.stack[i].state.appearances
+        || self.stack[i].state.location != other.stack[i].state.location
+      {
         return false;
       }
     }
@@ -203,8 +210,16 @@ where
     self.event_buffer.push(e)
   }
 
-  pub fn events_flush_to<H: FnMut(Event<ID, E>)>(&mut self, handler: &mut H) {
-    self.event_buffer.flush_to(handler)
+  pub fn events_flush_all_to<H: FnMut(Event<ID, E>)>(&mut self, handler: &mut H) {
+    self.events_flush_forward_to(self.event_buffer.len(), handler)
+  }
+
+  pub fn events_flush_forward_to<H: FnMut(Event<ID, E>)>(&mut self, n: usize, handler: &mut H) {
+    self.event_buffer.flush_to(n, handler)
+  }
+
+  pub fn events_forward_matching_length(&self, other: &Self) -> usize {
+    self.event_buffer().forward_matching_length(other.event_buffer())
   }
 
   pub fn min_match_begin(&self) -> usize {

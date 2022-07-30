@@ -20,7 +20,7 @@ pub fn one_of_tokens<ID>(tokens: &[&str]) -> Syntax<ID, char> {
   one_of_seqs(&tokens)
 }
 
-#[derive(Default, Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Default, Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub struct Location {
   pub chars: u64,
   pub lines: u64,

@@ -1,5 +1,6 @@
 use crate::schema::{Item, Location, Primary, Schema, Syntax};
 use crate::{debug, Error, Result};
+use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 
@@ -61,32 +62,35 @@ where
   }
 
   pub fn push_seq(&mut self, items: &[E]) -> Result<E, ()> {
-    debug!("PUSH: {:?}, buf_size={}", E::debug_symbols(items), self.buffer.len());
+    debug!(
+      "PUSH: {:?}, buf_size={}, {}",
+      E::debug_symbols(items),
+      self.buffer.len(),
+      if cfg!(feature = "concurrent") { "concurrent" } else { "serial" }
+    );
     for (i, path) in self.ongoing.iter().enumerate() {
       debug!("  ONGOING[{}]: {}", i, path)
     }
 
-    self.check_for_error_whether_impossible_to_proceed(items)?;
-
-    // append items into buffer
-    if items.is_empty() {
-      return Ok(());
-    }
     self.buffer.reserve(items.len());
     for item in items {
       self.buffer.push(*item);
     }
     self.location.increment_with_seq(items);
 
+    self.check_for_previous_error()?;
+    self.check_whether_possible_to_proceed()?;
+
+    // append items into buffer
+    if items.is_empty() {
+      return Ok(());
+    }
+
     self.proceed(false)?;
 
-    self.check_for_error_whether_unmatch_confirmed()?;
+    self.deliver_confirmed_events();
 
-    if self.ongoing.len() == 1 && self.prev_completed.is_empty() {
-      self.ongoing[0].events_flush_to(&mut self.event_handler);
-    } else if self.ongoing.is_empty() && self.prev_completed.len() == 1 {
-      self.prev_completed[0].events_flush_to(&mut self.event_handler);
-    }
+    self.check_whether_unmatch_confirmed()?;
 
     // reduce internal buffer if possible
     self.fit_buffer_to_min_size();
@@ -97,6 +101,8 @@ where
   pub fn finish(mut self) -> Result<E, ()> {
     debug!("FINISH");
 
+    self.check_for_previous_error()?;
+
     while !self.ongoing.is_empty() {
       self.proceed(true)?;
     }
@@ -105,24 +111,16 @@ where
       1 => {
         // notify all remaining events and success
         self.prev_completed[0].completed();
-        self.prev_completed[0].events_push(Event { location: self.location, kind: EventKind::End(self.id) });
-        self.prev_completed[0].events_flush_to(&mut self.event_handler);
+        self.prev_completed[0].events_push(Event { location: self.location, kind: EventKind::End(self.id.clone()) });
+        self.deliver_confirmed_events();
 
         Ok(())
       }
-      0 => self.error_unmatched_with_eof(),
+      0 => self.error(self.error_unmatch(&self.prev_unmatched)),
       _ => {
-        let mut expecteds = Vec::with_capacity(self.prev_completed.len());
-        let mut repr_actual = String::new();
-        for path in &self.prev_completed {
-          let expected = Some((path.current().match_begin, path.current().syntax().to_string()));
-          let (expected, actual) = error_unmatch_labels(&self.buffer, self.offset_of_buffer_head, expected, None);
-          expecteds.push(expected);
-          if repr_actual.is_empty() {
-            repr_actual = actual;
-          }
-        }
-        Err(Error::MultipleMatches { location: self.location, expecteds, actual: repr_actual })
+        let (prefix, expecteds, actual) =
+          create_unmatched_labels(&self.buffer, self.offset_of_buffer_head, &self.prev_completed);
+        self.error(Error::MultipleMatches { location: self.location, prefix, expecteds, actual })
       }
     }
   }
@@ -137,9 +135,13 @@ where
       evaluating.append(&mut Self::move_ongoing_paths_to_next_term(path)?);
     }
 
+    let mut i = 0;
     while !evaluating.is_empty() {
+      debug!("--- iteration[{}] ---", i + 1);
+      i += 1;
+
       let nexts = {
-        #[cfg(feature = "parallel")]
+        #[cfg(feature = "concurrent")]
         if evaluating.len() == 1 {
           vec![Self::proceed_on_path(evaluating.pop().unwrap(), &self.buffer, eof)]
         } else {
@@ -147,7 +149,7 @@ where
           evaluating.par_drain(..).map(|path| Self::proceed_on_path(path, &self.buffer, eof)).collect::<Vec<_>>()
         }
 
-        #[cfg(not(feature = "parallel"))]
+        #[cfg(not(feature = "concurrent"))]
         evaluating.drain(..).map(|path| Self::proceed_on_path(path, &self.buffer, eof)).collect::<Vec<_>>()
       };
 
@@ -156,7 +158,7 @@ where
         evaluating.append(&mut need_to_be_reevaluated);
         self.ongoing.append(&mut ongoing);
         if let Some(unmatched) = unmatched {
-          self.prev_unmatched.push(unmatched);
+          self.push_unmatched(unmatched);
         }
         if let Some(completed) = completed {
           self.prev_completed.push(completed);
@@ -167,19 +169,12 @@ where
 
     Self::merge_paths(&mut self.ongoing);
     Self::merge_paths(&mut self.prev_completed);
-    Self::merge_paths(&mut self.prev_unmatched);
     Ok(())
   }
 
   fn proceed_on_path(mut path: Path<'s, ID, E>, buffer: &[E], eof: bool) -> Result<E, NextPaths<'s, ID, E>> {
     debug_assert!(matches!(path.current().syntax().primary, Primary::Term(..)));
-    debug!(
-      "~ === proceed_on_path({}, {}, {}): {}",
-      path,
-      E::debug_symbols(buffer),
-      eof,
-      if cfg!(feature = "parallel") { "parallel" } else { "serial" }
-    );
+    debug!("~ === proceed_on_path({}, {}, {})", path, E::debug_symbols(&buffer[path.current().match_begin..]), eof,);
 
     let mut next = NextPaths {
       need_to_be_reevaluated: Vec::with_capacity(1),
@@ -261,6 +256,25 @@ where
     Ok(term_reached)
   }
 
+  fn deliver_confirmed_events(&mut self) {
+    let mut actives = self.ongoing.iter_mut().chain(self.prev_completed.iter_mut()).collect::<Vec<_>>();
+    if actives.len() == 1 {
+      actives[0].events_flush_all_to(&mut self.event_handler);
+    } else if !actives.is_empty() {
+      let mut matches = actives[0].event_buffer().len();
+      for i in 1..actives.len() {
+        let len = actives[0].events_forward_matching_length(actives[i]);
+        matches = std::cmp::min(matches, len);
+      }
+      if matches > 0 {
+        actives[0].events_flush_forward_to(matches, &mut self.event_handler);
+        for active in actives.iter_mut().skip(1) {
+          active.events_flush_forward_to(matches, &mut |_| {});
+        }
+      }
+    }
+  }
+
   fn merge_paths(paths: &mut Vec<Path<ID, E>>) {
     for i in 0..paths.len() {
       let mut j = i + 1;
@@ -275,36 +289,22 @@ where
     }
   }
 
-  fn check_for_error_whether_impossible_to_proceed(&self, items: &[E]) -> Result<E, ()> {
-    debug_assert!(!self.ongoing.is_empty() || !self.prev_completed.is_empty() || !self.prev_unmatched.is_empty());
-    if !items.is_empty() && self.ongoing.is_empty() {
-      if !self.prev_completed.is_empty() {
-        // `items` appeared, but the parser state was already complete and waiting for EOF
-        Err(self.error_unmatch_with_eof(None, items.first().copied()))
-      } else {
-        // if unmatch has already been confirmed but the application has attempted to make a further push
-        self.check_for_error_whether_unmatch_confirmed()
+  fn push_unmatched(&mut self, path: Path<'s, ID, E>) {
+    let save = if let Some(current) = self.prev_unmatched.last() {
+      match path.current().location.cmp(&current.current().location) {
+        Ordering::Greater => {
+          self.prev_unmatched.truncate(0);
+          true
+        }
+        Ordering::Equal => !self.prev_unmatched.iter().any(|c| c.can_merge(&path)),
+        Ordering::Less => false,
       }
     } else {
-      Ok(())
+      true
+    };
+    if save {
+      self.prev_unmatched.push(path);
     }
-  }
-
-  fn check_for_error_whether_unmatch_confirmed(&self) -> Result<E, ()> {
-    debug_assert!(!self.ongoing.is_empty() || !self.prev_completed.is_empty() || !self.prev_unmatched.is_empty());
-    if self.ongoing.is_empty() && self.prev_completed.is_empty() {
-      let errors = self.prev_unmatched.iter().map(|p| self.error_unmatch(Some(p.current()))).collect::<Vec<_>>();
-      Error::errors(errors)
-    } else {
-      Ok(())
-    }
-  }
-
-  fn error_unmatched_with_eof(&self) -> Result<E, ()> {
-    debug_assert!(self.ongoing.is_empty() && self.prev_completed.is_empty() && !self.prev_unmatched.is_empty());
-    let errors =
-      self.prev_unmatched.iter().map(|p| self.error_unmatch_with_eof(Some(p.current()), None)).collect::<Vec<_>>();
-    Error::errors(errors)
   }
 
   fn fit_buffer_to_min_size(&mut self) {
@@ -327,58 +327,116 @@ where
     }
   }
 
-  fn error_unmatch(&self, expected: Option<&State<ID, E>>) -> Error<E> {
-    let location = expected.map(|s| s.location).unwrap_or(self.location);
-    let actual = self.buffer.last().copied();
-    let buffer = if self.buffer.is_empty() { &self.buffer[..] } else { &self.buffer[..(self.buffer.len() - 1)] };
-    Self::error_unmatch_with(location, buffer, self.offset_of_buffer_head, expected, actual)
+  fn check_whether_possible_to_proceed(&mut self) -> Result<E, ()> {
+    debug_assert!(!self.ongoing.is_empty() || !self.prev_completed.is_empty() || !self.prev_unmatched.is_empty());
+    if self.ongoing.is_empty() {
+      if !self.prev_completed.is_empty() {
+        // `items` appeared, but the parser state was already complete and waiting for EOF
+        let pos = self.prev_completed.iter().map(|p| p.current().location.position()).max().unwrap();
+        let buffer_pos = (pos - self.offset_of_buffer_head) as usize;
+        if self.buffer.len() == buffer_pos {
+          Ok(())
+        } else {
+          self.error(self.error_eof_expected(&self.prev_completed))
+        }
+      } else {
+        // if unmatch has already been confirmed but the application has attempted to make a further push
+        self.check_whether_unmatch_confirmed()
+      }
+    } else {
+      Ok(())
+    }
   }
 
-  fn error_unmatch_with_eof(&self, expected: Option<&State<ID, E>>, actual: Option<E>) -> Error<E> {
-    let location = expected.map(|s| s.location).unwrap_or(self.location);
-    Self::error_unmatch_with(location, &self.buffer, self.offset_of_buffer_head, expected, actual)
+  fn check_whether_unmatch_confirmed(&mut self) -> Result<E, ()> {
+    debug_assert!(!self.ongoing.is_empty() || !self.prev_completed.is_empty() || !self.prev_unmatched.is_empty());
+    if self.ongoing.is_empty() && self.prev_completed.is_empty() {
+      self.error(self.error_unmatch(&self.prev_unmatched))
+    } else {
+      Ok(())
+    }
   }
 
-  fn error_unmatch_with(
-    location: E::Location, buffer: &[E], buffer_offset: u64, expected: Option<&State<ID, E>>, actual: Option<E>,
-  ) -> Error<E> {
-    let expected = expected.map(|s| (s.match_begin, s.syntax().to_string()));
-    let (expected, actual) = error_unmatch_labels(buffer, buffer_offset, expected, actual);
-    Error::Unmatched { location, expected, actual }
+  fn check_for_previous_error(&self) -> Result<E, ()> {
+    if self.ongoing.is_empty() && self.prev_completed.is_empty() && self.prev_unmatched.is_empty() {
+      Err(Error::Previous)
+    } else {
+      Ok(())
+    }
+  }
+
+  fn error_unmatch(&self, expecteds: &[Path<ID, E>]) -> Error<E> {
+    let location = expecteds.first().map(|p| p.current().location).unwrap_or(self.location);
+    let expected_syntaxes = expecteds.iter().map(|p| p.to_string()).collect::<Vec<_>>();
+    let (prefix, expecteds, actual) = create_unmatched_labels(&self.buffer, self.offset_of_buffer_head, expecteds);
+    Error::Unmatched { location, prefix, expecteds, expected_syntaxes, actual }
+  }
+
+  fn error_eof_expected(&self, completed: &[Path<ID, E>]) -> Error<E> {
+    let location = completed.first().map(|p| p.current().location).unwrap_or(self.location);
+    let match_length = completed.first().map(|p| p.current().match_begin).unwrap_or(self.buffer.len());
+    let prefix = create_unmatched_label_prefix(&self.buffer, self.offset_of_buffer_head, match_length);
+    let expected = format!("[{}]", EOF_SYMBOL);
+    let actual = create_unmatched_label_actual(&self.buffer, match_length);
+    Error::Unmatched { location, prefix, expecteds: vec![expected], expected_syntaxes: vec![], actual }
+  }
+
+  fn error<T>(&mut self, err: Error<E>) -> Result<E, T> {
+    self.ongoing.truncate(0);
+    self.prev_unmatched.truncate(0);
+    self.prev_completed.truncate(0);
+    Err(err)
   }
 }
 
-fn error_unmatch_labels<E: Item>(
-  buffer: &[E], buffer_offset: u64, expected: Option<(usize, String)>, actual: Option<E>,
-) -> (String, String) {
-  const ELPS_LEN: usize = 3;
-  const EOF_SYMBOL: &str = "EOF";
-  debug_assert!(expected.is_some() || actual.is_some());
-  debug_assert!(expected.as_ref().map(|x| x.0 <= buffer.len()).unwrap_or(true));
+fn create_unmatched_labels<ID, E: Item>(
+  buffer: &[E], buf_offset: u64, expecteds: &[Path<ID, E>],
+) -> (String, Vec<String>, String)
+where
+  ID: Clone + Display + Debug + PartialEq + Ord + Eq + Hash,
+{
+  let match_length = expecteds.first().map(|p| p.current().match_begin).unwrap_or(buffer.len());
+  debug_assert!(expecteds.iter().all(|p| p.current().match_begin == match_length));
 
-  let smpl_len = E::SAMPLING_UNIT_AT_ERROR;
-  let sampling_end = expected.as_ref().map(|(begin, _)| *begin).unwrap_or(buffer.len());
-  let sampling_begin = sampling_end - std::cmp::min(smpl_len, sampling_end);
-  let prefix_length = std::cmp::min(ELPS_LEN as u64, buffer_offset + sampling_begin as u64) as usize;
-  let prefix = (0..prefix_length).map(|_| ".").collect::<String>();
-  let expected = {
-    let sample = E::debug_symbols(&buffer[sampling_begin..sampling_end]);
-    let suffix = expected.map(|s| s.1).unwrap_or_else(|| String::from(EOF_SYMBOL));
-    format!("{}{}[{}]", prefix, sample, suffix)
-  };
-  let actual = {
-    let sample = if buffer.len() - sampling_begin <= smpl_len * 3 + ELPS_LEN {
-      E::debug_symbols(&buffer[sampling_begin..])
+  debug_assert!(!expecteds.is_empty());
+  let expecteds = expecteds.iter().map(|path| format!("[{}]", path.current().syntax())).collect::<Vec<_>>();
+
+  (
+    create_unmatched_label_prefix(buffer, buf_offset, match_length),
+    expecteds,
+    create_unmatched_label_actual(buffer, match_length),
+  )
+}
+
+const ELLAPSE_LENGTH: usize = 3;
+const EOF_SYMBOL: &str = "EOF";
+
+fn create_unmatched_label_prefix<E: Item>(buffer: &[E], buf_offset: u64, match_length: usize) -> String {
+  debug_assert!(match_length <= buffer.len());
+  let sample_length = E::SAMPLING_UNIT_AT_ERROR;
+  let sample_end = match_length;
+  let sample_begin = sample_end - std::cmp::min(sample_length, sample_end);
+  let ellapse_length = std::cmp::min(ELLAPSE_LENGTH as u64, buf_offset + sample_begin as u64) as usize;
+  let ellapse = (0..ellapse_length).map(|_| ".").collect::<String>();
+  let sample = E::debug_symbols(&buffer[sample_begin..sample_end]);
+  format!("{}{}", ellapse, sample)
+}
+
+fn create_unmatched_label_actual<E: Item>(buffer: &[E], match_length: usize) -> String {
+  let sample_length = E::SAMPLING_UNIT_AT_ERROR;
+  if match_length < buffer.len() {
+    let target = E::debug_symbol(buffer[match_length]);
+    if match_length + 1 < buffer.len() {
+      let suffix_length = std::cmp::min(sample_length, buffer.len() - match_length - 1);
+      let suffix = E::debug_symbols(&buffer[match_length + 1..][..suffix_length]);
+      format!("[{}]{}...", target, suffix)
     } else {
-      let head = E::debug_symbols(&buffer[sampling_begin..][..smpl_len * 2]);
-      let ellapse = (0..ELPS_LEN).map(|_| ".").collect::<String>();
-      let tail = E::debug_symbols(&buffer[buffer.len() - smpl_len..]);
-      format!("{}{}{}", head, ellapse, tail)
-    };
-    let suffix = actual.map(|i| E::debug_symbol(i)).unwrap_or_else(|| String::from(EOF_SYMBOL));
-    format!("{}{}[{}]", prefix, sample, suffix)
-  };
-  (expected, actual)
+      format!("[{}]...", target)
+    }
+  } else {
+    debug_assert!(match_length == buffer.len());
+    format!("[{}]", EOF_SYMBOL)
+  }
 }
 
 impl<'s, ID, H: FnMut(Event<ID, char>)> Context<'s, ID, char, H>
