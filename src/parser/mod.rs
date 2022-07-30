@@ -139,7 +139,7 @@ where
 
     while !evaluating.is_empty() {
       let nexts = {
-        #[cfg(feature = "parallel")]
+        #[cfg(feature = "concurrent")]
         if evaluating.len() == 1 {
           vec![Self::proceed_on_path(evaluating.pop().unwrap(), &self.buffer, eof)]
         } else {
@@ -147,7 +147,7 @@ where
           evaluating.par_drain(..).map(|path| Self::proceed_on_path(path, &self.buffer, eof)).collect::<Vec<_>>()
         }
 
-        #[cfg(not(feature = "parallel"))]
+        #[cfg(not(feature = "concurrent"))]
         evaluating.drain(..).map(|path| Self::proceed_on_path(path, &self.buffer, eof)).collect::<Vec<_>>()
       };
 
