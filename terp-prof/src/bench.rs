@@ -1,7 +1,4 @@
 extern crate test;
-use std::collections::HashMap;
-use std::fs;
-use std::path::{Path, PathBuf};
 use terp::parser::{Context, Event};
 use terp::schema::json::{schema, ID};
 use terp::schema::Schema;
@@ -36,21 +33,6 @@ fn rfc8259_sample_wikipedia(b: &mut test::Bencher) {
     parser.push_str(SAMPLE_WIKIPEDIA).unwrap();
     parser.finish().unwrap();
   });
-}
-
-#[bench]
-fn various_json_files(b: &mut test::Bencher) {
-  let naive_schema = naive_rfc8259_schema();
-  for (name, path) in files("ok-").into_iter() {
-    let content = fs::read_to_string(&path).unwrap();
-
-    b.iter(|| {
-      let event_handler = |_: Event<ID, char>| ();
-      let mut parser = Context::new(&naive_schema, ID::JsonText, event_handler).unwrap();
-      parser.push_str(&content).unwrap();
-      parser.finish().unwrap();
-    });
-  }
 }
 
 fn naive_rfc8259_schema() -> Schema<ID, char> {
@@ -98,16 +80,4 @@ fn naive_rfc8259_schema() -> Schema<ID, char> {
     .define(Unescaped, range('\x20'..='\x21') | range('\x23'..='\x5B') | range('\x5D'..='\u{10FFFF}'))
     .define(Digit, range('0'..='9'))
     .define(HexDig, range('0'..='9') | range('a'..='f') | range('A'..='F'))
-}
-
-fn files(prefix: &str) -> HashMap<String, PathBuf> {
-  fs::read_dir(Path::new("src").join("parser").join("test").join("data"))
-    .unwrap()
-    .into_iter()
-    .map(|path| path.unwrap().path())
-    .filter(|path| path.is_file())
-    .map(|path| (path.file_name().map(|name| name.to_string_lossy().to_string()).unwrap(), path))
-    .filter(|(name, _)| name.starts_with(prefix))
-    .map(|(name, path)| (name[prefix.len()..].to_string(), path))
-    .collect::<HashMap<_, _>>()
 }
