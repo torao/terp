@@ -266,7 +266,7 @@ fn rfc8259_string_ignore_chars() {
 #[test]
 fn various_json_files() {
   let schema = schema();
-  for (name, path) in files("ok-").into_iter() {
+  for (name, path) in files("ok-", &[".json", ".json.txt"]).into_iter() {
     eprintln!("----------- [{}] ------------", name);
     let content = fs::read_to_string(&path).unwrap();
     let event_handler = |_: Event<ID, char>| ();
@@ -295,14 +295,23 @@ where
   events
 }
 
-fn files(prefix: &str) -> HashMap<String, PathBuf> {
+fn files(prefix: &str, suffixes: &[&str]) -> HashMap<String, PathBuf> {
   fs::read_dir(Path::new("src").join("parser").join("test").join("data"))
     .unwrap()
     .into_iter()
-    .map(|path| path.unwrap().path())
-    .filter(|path| path.is_file())
-    .map(|path| (path.file_name().map(|name| name.to_string_lossy().to_string()).unwrap(), path))
-    .filter(|(name, _)| name.starts_with(prefix))
-    .map(|(name, path)| (name[prefix.len()..].to_string(), path))
+    .filter_map(|path| {
+      let path = path.unwrap().path();
+      if path.is_file() {
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        if name.starts_with(prefix) && suffixes.iter().any(|suffix| name.ends_with(suffix)) {
+          let name = name[prefix.len()..].to_string();
+          Some((name, path))
+        } else {
+          None
+        }
+      } else {
+        None
+      }
+    })
     .collect::<HashMap<_, _>>()
 }

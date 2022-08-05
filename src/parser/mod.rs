@@ -78,7 +78,6 @@ where
     }
     self.location.increment_with_seq(items);
 
-    self.check_for_previous_error()?;
     self.check_whether_possible_to_proceed()?;
 
     // append items into buffer
@@ -93,7 +92,7 @@ where
     self.check_whether_unmatch_confirmed()?;
 
     // reduce internal buffer if possible
-    self.fit_buffer_to_min_size();
+    self.fit_buffer_to_min_size(items.len());
 
     Ok(())
   }
@@ -174,7 +173,7 @@ where
 
   fn proceed_on_path(mut path: Path<'s, ID, E>, buffer: &[E], eof: bool) -> Result<E, NextPaths<'s, ID, E>> {
     debug_assert!(matches!(path.current().syntax().primary, Primary::Term(..)));
-    debug!("~ === proceed_on_path({}, {}, {})", path, E::debug_symbols(&buffer[path.current().match_begin..]), eof,);
+    debug!("~ === proceed_on_path({}, {}, {})", path, E::debug_symbols(&buffer[path.current().match_begin..]), eof);
 
     let mut next = NextPaths {
       need_to_be_reevaluated: Vec::with_capacity(1),
@@ -240,12 +239,11 @@ where
         }
         Primary::Or(branches) => {
           for branch in branches {
+            debug_assert!(matches!(branch, Syntax { primary: Primary::Seq(..), .. }));
             if let Syntax { primary: Primary::Seq(seq), .. } = branch {
               let mut next = eval_path.clone();
               next.stack_push(seq);
               ongoing.push(next);
-            } else {
-              unreachable!("Primary::Or contains a branch other than Seq")
             }
           }
         }
@@ -307,16 +305,18 @@ where
     }
   }
 
-  fn fit_buffer_to_min_size(&mut self) {
+  fn fit_buffer_to_min_size(&mut self, incremental: usize) {
     // reduce internal buffer if possible
     // TODO: how often the buffer is reduced?
-    const BUFFER_SHRINKAGE_CHECKPOINT_BIT: usize = 8;
-    const BUFFER_SHRINKAGE_CHECKPOINT: u64 = (1u64 << BUFFER_SHRINKAGE_CHECKPOINT_BIT) - 1u64;
-    if self.location.position() & BUFFER_SHRINKAGE_CHECKPOINT != BUFFER_SHRINKAGE_CHECKPOINT {
+    if (self.location.position() - incremental as u64) >> 8 == self.location.position() >> 8 {
       return;
     }
-    let paths = vec![&mut self.ongoing, &mut self.prev_completed, &mut self.prev_unmatched];
-    let paths = paths.into_iter().flatten().collect::<Vec<_>>();
+    let paths = self
+      .ongoing
+      .iter_mut()
+      .chain(self.prev_completed.iter_mut())
+      .chain(self.prev_unmatched.iter_mut())
+      .collect::<Vec<_>>();
     let min_offset = paths.iter().map(|p| p.min_match_begin()).min().unwrap();
     if min_offset > 0 {
       self.buffer.drain(0..min_offset);
@@ -328,20 +328,18 @@ where
   }
 
   fn check_whether_possible_to_proceed(&mut self) -> Result<E, ()> {
-    debug_assert!(!self.ongoing.is_empty() || !self.prev_completed.is_empty() || !self.prev_unmatched.is_empty());
+    self.check_for_previous_error()?;
+
+    debug_assert!(!self.ongoing.is_empty() || !self.prev_completed.is_empty() || self.prev_unmatched.is_empty());
     if self.ongoing.is_empty() {
-      if !self.prev_completed.is_empty() {
-        // `items` appeared, but the parser state was already complete and waiting for EOF
-        let pos = self.prev_completed.iter().map(|p| p.current().location.position()).max().unwrap();
-        let buffer_pos = (pos - self.offset_of_buffer_head) as usize;
-        if self.buffer.len() == buffer_pos {
-          Ok(())
-        } else {
-          self.error(self.error_eof_expected(&self.prev_completed))
-        }
+      debug_assert!(!self.prev_completed.is_empty());
+      // `items` appeared, but the parser state was already complete and waiting for EOF
+      let pos = self.prev_completed.iter().map(|p| p.current().location.position()).max().unwrap();
+      let buffer_pos = (pos - self.offset_of_buffer_head) as usize;
+      if self.buffer.len() == buffer_pos {
+        Ok(())
       } else {
-        // if unmatch has already been confirmed but the application has attempted to make a further push
-        self.check_whether_unmatch_confirmed()
+        self.error(self.error_eof_expected(&self.prev_completed))
       }
     } else {
       Ok(())

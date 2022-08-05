@@ -6,4 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-terp = { path = "..", version = "*", features = ["parallel"] }
+terp = { path = "..", version = "*", features = ["concurrent"] }
+# terp = { path = "..", version = "*" }
+
+clap = { version = "3.2", features = ["derive"] }
+serde_json = "1.0"
+nom = "7.1"

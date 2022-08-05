@@ -55,6 +55,43 @@ fn event_buffer_equivalence_when_diffferent_event() {
 }
 
 #[test]
+#[cfg(debug_assertions)]
+#[should_panic]
+fn event_buffer_inconsistent_stack() {
+  let location = chars::Location::default();
+  let mut buffer = EventBuffer::new(10);
+  buffer.push(Event { location, kind: EventKind::Begin("A") });
+  buffer.push(Event { location, kind: EventKind::Fragments(vec!['x']) });
+  buffer.push(Event { location, kind: EventKind::End("B") });
+}
+
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic]
+fn event_buffer_unexpected_end_event() {
+  let location = chars::Location::default();
+  let mut buffer = EventBuffer::<_, char>::new(10);
+  buffer.push(Event { location, kind: EventKind::End("A") });
+}
+
+#[test]
+fn event_buffer_forward_matching_length() {
+  let buffer1 = Events::new().begin("A").fragments("xyz").end().to_event_buffer();
+  let buffer2 = Events::new().begin("A").fragments("xyz").end().to_event_buffer();
+  assert_eq!(3, buffer1.len());
+  assert_eq!(3, buffer2.len());
+  assert_eq!(3, buffer1.forward_matching_length(&buffer2));
+  assert_eq!(3, buffer2.forward_matching_length(&buffer1));
+
+  let buffer1 = Events::new().begin("A").fragments("xy").begin("B").fragments("z").end().end().to_event_buffer();
+  let buffer2 = Events::new().begin("A").fragments("xy").begin("C").fragments("z").end().end().to_event_buffer();
+  assert_eq!(6, buffer1.len());
+  assert_eq!(6, buffer2.len());
+  assert_eq!(2, buffer1.forward_matching_length(&buffer2));
+  assert_eq!(2, buffer2.forward_matching_length(&buffer1));
+}
+
+#[test]
 fn context_definition_not_found() {
   let schema = Schema::<&str, char>::new("Foo");
 
@@ -304,7 +341,7 @@ fn context_seq_keywords() {
     "true", "try", "type", "typeof", "union", "unsafe", "unsized", "use", "virtual", "where", "while", "yield",
   ];
 
-  let a = keywords.iter().map(|kwd| token(*kwd)).reduce(|a, b| a | b).unwrap();
+  let a = keywords.iter().map(|kwd| token(kwd)).reduce(|a, b| a | b).unwrap();
   let schema = Schema::new("Foo").define("A", a);
   for kwd in &keywords {
     eprintln!("[{}] ---------------------", kwd);
@@ -401,6 +438,51 @@ fn context_push_seq() {
   assert_unmatch(parser.push_str("3"), location(3, 0, 3), "012", "[EOF]", "['3']...");
 }
 
+#[test]
+fn context_fit_buffer_to_min_size() {
+  let a = ascii_digit() * (0..);
+  let schema = Schema::new("Foo").define("A", a);
+  let mut events = Vec::new();
+  let handler = |e: Event<_, _>| events.push(e);
+  let mut parser = Context::new(&schema, "A", handler).unwrap();
+  let mut expected = Events::new().begin("A");
+  for i in 0..=1024 {
+    let ch = char::from_digit(i % 10, 10).unwrap();
+    parser.push(ch).unwrap();
+    expected = expected.fragments(&ch.to_string());
+  }
+  parser.finish().unwrap();
+  expected.end().assert_eq(&events);
+}
+
+#[test]
+fn check_whether_possible_to_proceed() {
+  let a = ascii_digit() * 3;
+  let schema = Schema::new("Foo").define("A", a);
+
+  let mut events = Vec::new();
+  let handler = |e: Event<_, _>| events.push(e);
+  let mut parser = Context::new(&schema, "A", handler).unwrap();
+  parser.push_str("012").unwrap(); // completed
+  parser.push_str("").unwrap(); // OK
+  parser.finish().unwrap();
+  Events::new().begin("A").fragments("012").end().assert_eq(&events);
+
+  let mut events = Vec::new();
+  let handler = |e: Event<_, _>| events.push(e);
+  let mut parser = Context::new(&schema, "A", handler).unwrap();
+  parser.push_str("012").unwrap(); // completed
+  assert_unmatch(parser.push_str("3"), location(3, 0, 3), "012", "[EOF]", "['3']...");
+
+  let mut events = Vec::new();
+  let handler = |e: Event<_, _>| events.push(e);
+  let mut parser = Context::new(&schema, "A", handler).unwrap();
+  parser.push_str("0").unwrap();
+  parser.push_str("12").unwrap(); // completed
+  parser.finish().unwrap();
+  Events::new().begin("A").fragments("012").end().assert_eq(&events);
+}
+
 fn assert_prev_err<T: Debug + PartialEq>(r: Result<char, T>) {
   assert_eq!(Err(Error::Previous), r);
 }
@@ -495,7 +577,7 @@ fn location(chars: u64, lines: u64, columns: u64) -> chars::Location {
   chars::Location { chars, lines, columns }
 }
 
-pub struct Events<ID: Clone + Display + Debug + Eq + Eq + Hash> {
+pub(crate) struct Events<ID: Clone + Display + Debug + Eq + Eq + Hash> {
   location: chars::Location,
   events: Vec<Event<ID, char>>,
   stack: Vec<ID>,
@@ -527,6 +609,13 @@ impl<ID: Clone + Display + Debug + Eq + Eq + Hash> Events<ID> {
   pub fn to_vec(&self) -> Vec<Event<ID, char>> {
     assert!(self.stack.is_empty(), "`end()` missing in expected events building: {:?}", self.stack);
     self.events.clone()
+  }
+  pub fn to_event_buffer(&self) -> EventBuffer<ID, char> {
+    let mut buffer = EventBuffer::new(self.events.len());
+    for e in &self.events {
+      buffer.push(e.clone());
+    }
+    buffer
   }
   pub fn assert_eq(&self, actual: &[Event<ID, char>]) {
     assert_events_eq(&self.to_vec(), actual);

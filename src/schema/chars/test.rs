@@ -1,6 +1,5 @@
 use crate::schema::chars::Location;
-use crate::schema::{Item, Location as L, MatchResult, Primary, Syntax};
-use crate::Result;
+use crate::schema::{Item, Location as L, MatchResult, Matcher, Primary, Syntax};
 
 #[test]
 fn char_location() {
@@ -67,7 +66,7 @@ fn test_all(syntax: Syntax<String, char>, label: &str, t0: char, t1: char, pred:
   }
 }
 
-fn get_matcher<ID, E: Item>(s: Syntax<ID, E>) -> Box<dyn Fn(&[E]) -> Result<E, MatchResult>> {
+fn get_matcher<ID, E: Item>(s: Syntax<ID, E>) -> Box<Matcher<E>> {
   match s {
     Syntax { primary: Primary::Term(_, matcher), .. } => matcher,
     _ => panic!(),
