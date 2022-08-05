@@ -341,7 +341,7 @@ fn context_seq_keywords() {
     "true", "try", "type", "typeof", "union", "unsafe", "unsized", "use", "virtual", "where", "while", "yield",
   ];
 
-  let a = keywords.iter().map(|kwd| token(*kwd)).reduce(|a, b| a | b).unwrap();
+  let a = keywords.iter().map(|kwd| token(kwd)).reduce(|a, b| a | b).unwrap();
   let schema = Schema::new("Foo").define("A", a);
   for kwd in &keywords {
     eprintln!("[{}] ---------------------", kwd);

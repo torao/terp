@@ -356,8 +356,10 @@ impl<ID: Debug, E: 'static + Item> Mul<RangeToInclusive<usize>> for Syntax<ID, E
 pub(crate) const OP_CONCAT: &str = ",";
 pub(crate) const OP_CHOICE: &str = " |";
 
+pub type Matcher<E> = dyn Fn(&[E]) -> Result<E, MatchResult> + Send + Sync;
+
 pub(crate) enum Primary<ID, E: Item> {
-  Term(String, Box<dyn Fn(&[E]) -> Result<E, MatchResult> + Send + Sync>),
+  Term(String, Box<Matcher<E>>),
   Alias(ID),
   Seq(Vec<Syntax<ID, E>>),
   Or(Vec<Syntax<ID, E>>),

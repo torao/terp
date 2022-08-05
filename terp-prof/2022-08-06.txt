@@ -1,0 +1,16 @@
+C:\Users\torao\git\lexis\terp-prof>target\release\terp-prof bench -f ..\src\parser\test\data\ok-day-of-week.txt -f ..\src\parser\test\data\ok-matrix.json.txt -f ..\src\parser\test\data\ok-sgml.json.txt
+[..\src\parser\test\data\ok-day-of-week.txt: 78 chars]
+  terp         :  5,262,350 ns/iter (±2.1%)
+  terp (naive) :  5,120,375 ns/iter (±3.0%)
+  nom          :     50,837 ns/iter (±0.5%)
+  serde_json   :        450 ns/iter (±0.3%)
+[..\src\parser\test\data\ok-matrix.json.txt: 53 chars]
+  terp         :  2,447,415 ns/iter (±2.4%)
+  terp (naive) :  2,448,697 ns/iter (±1.8%)
+  nom          :     21,048 ns/iter (±0.3%)
+  serde_json   :        360 ns/iter (±0.4%)
+[..\src\parser\test\data\ok-sgml.json.txt: 617 chars]
+  terp         : 88,084,710 ns/iter (±1.0%)
+  terp (naive) : 88,050,070 ns/iter (±0.8%)
+  nom          :    174,987 ns/iter (±1.1%)
+  serde_json   :      2,285 ns/iter (±0.8%)
