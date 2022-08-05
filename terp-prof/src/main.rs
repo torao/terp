@@ -18,9 +18,13 @@ struct Args {
 #[derive(Debug, Clone, Subcommand)]
 enum Commands {
   Bench {
-    #[clap(short, long, value_parser)]
+    #[clap(value_parser)]
     files: Vec<String>,
   },
+  Parse {
+    #[clap(value_parser)]
+    file: String,
+  }
 }
 
 fn main() {
@@ -34,7 +38,18 @@ fn main() {
         bench(&file);
       }
     }
+    Commands::Parse { file } => {
+      parse(&file);
+    }
   }
+}
+
+fn parse(filename: &str) {
+  let content = fs::read_to_string(filename).unwrap();
+  let schema = schema();
+  let mut parser = Context::new(&schema, ID::JsonText, |_| ()).unwrap();
+  parser.push_str(&content).unwrap();
+  parser.finish().unwrap();
 }
 
 fn bench(filename: &str) {

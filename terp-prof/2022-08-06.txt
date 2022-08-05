@@ -1,16 +1,34 @@
-C:\Users\torao\git\lexis\terp-prof>target\release\terp-prof bench -f ..\src\parser\test\data\ok-day-of-week.txt -f ..\src\parser\test\data\ok-matrix.json.txt -f ..\src\parser\test\data\ok-sgml.json.txt
-[..\src\parser\test\data\ok-day-of-week.txt: 78 chars]
-  terp         :  5,262,350 ns/iter (±2.1%)
-  terp (naive) :  5,120,375 ns/iter (±3.0%)
-  nom          :     50,837 ns/iter (±0.5%)
-  serde_json   :        450 ns/iter (±0.3%)
-[..\src\parser\test\data\ok-matrix.json.txt: 53 chars]
-  terp         :  2,447,415 ns/iter (±2.4%)
-  terp (naive) :  2,448,697 ns/iter (±1.8%)
-  nom          :     21,048 ns/iter (±0.3%)
-  serde_json   :        360 ns/iter (±0.4%)
-[..\src\parser\test\data\ok-sgml.json.txt: 617 chars]
-  terp         : 88,084,710 ns/iter (±1.0%)
-  terp (naive) : 88,050,070 ns/iter (±0.8%)
-  nom          :    174,987 ns/iter (±1.1%)
-  serde_json   :      2,285 ns/iter (±0.8%)
+torao@beryl:~/git/terp/terp-prof$ target/release/terp-prof bench ../src/parser/test/data/*.json*
+[../src/parser/test/data/ok-matrix.json.txt: 49 chars]
+  terp         :  2,059,149 ns/iter (±0.5%)
+  terp (naive) :  2,066,080 ns/iter (±0.6%)
+  nom          :     13,240 ns/iter (±0.3%)
+  serde_json   :        306 ns/iter (±0.0%)
+[../src/parser/test/data/ok-sgml.json.txt: 593 chars]
+  terp         : 126,949,434 ns/iter (±0.3%)
+  terp (naive) : 126,941,516 ns/iter (±0.3%)
+  nom          :    139,713 ns/iter (±0.3%)
+  serde_json   :      1,993 ns/iter (±0.1%)
+[../src/parser/test/data/ok-wikipedia-sample.json: 380 chars]
+  terp         : 35,829,688 ns/iter (±0.3%)
+  terp (naive) : 35,820,151 ns/iter (±0.2%)
+  nom          :     59,634 ns/iter (±0.1%)
+  serde_json   :      1,135 ns/iter (±0.1%)
+
+torao@beryl:~/git/terp/terp-prof$ sudo perf stat -- target/release/terp-prof parse ../src/parser/test/data/ok-sgml.json.txt
+
+ Performance counter stats for 'target/release/terp-prof parse ../src/parser/test/data/ok-sgml.json.txt':
+
+            406.83 msec task-clock                #    2.723 CPUs utilized          
+             5,541      context-switches          #   13.620 K/sec                  
+               339      cpu-migrations            #  833.265 /sec                   
+             9,261      page-faults               #   22.764 K/sec                  
+     1,376,651,992      cycles                    #    3.384 GHz                    
+     1,991,073,014      instructions              #    1.45  insn per cycle         
+       409,989,383      branches                  #    1.008 G/sec                  
+         3,018,418      branch-misses             #    0.74% of all branches        
+
+       0.149386071 seconds time elapsed
+
+       0.356768000 seconds user
+       0.062959000 seconds sys
