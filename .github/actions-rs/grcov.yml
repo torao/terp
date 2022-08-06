@@ -1,0 +1,20 @@
+#branch: true
+ignore-not-existing: true
+llvm: true
+filter: covered
+#output-type: lcov
+#output-path: ./lcov.info
+#prefix-dir: /home/user/build/
+ignore:
+  - "/*"
+  - "C:/*"
+  - "../*"
+  - "src/main.rs"
+  - "**/test.rs"
+  - "**/test/*"
+#path-mapping:
+#  - "/path1"
+#  - "/path2"
+source-dir: "./src"
+#excl-line: "#\\[derive\\("
+#excl-br-line: "#\\[derive\\(" 
