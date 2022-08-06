@@ -27,6 +27,7 @@ fn event() {
 
 #[test]
 #[should_panic]
+#[cfg(debug_assertions)]
 fn event_buffer_inconsist_begin_end() {
   let location = chars::Location::default();
   let mut events = EventBuffer::new(1);
