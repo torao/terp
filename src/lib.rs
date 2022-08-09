@@ -52,6 +52,8 @@
 //! assert_eq!(expected, Event::normalize(&events));
 //! ```
 //!
+#![allow(uncommon_codepoints)]
+
 use schema::Symbol;
 
 pub mod parser;

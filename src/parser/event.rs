@@ -111,9 +111,7 @@ where
   }
 
   pub fn normalize(mut self) -> Self {
-    for e in self.events.drain(..).collect::<Vec<_>>() {
-      self.events.push(e);
-    }
+    self.events = Event::normalize(&self.events);
     self.events.shrink_to_fit();
     self
   }

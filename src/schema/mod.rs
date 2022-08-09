@@ -85,6 +85,8 @@ impl<ID: Debug, Σ: Symbol> Debug for Schema<ID, Σ> {
   }
 }
 
+/// `Symbol` represents the type of 'terminal string' targeted by the schema or parser.
+///
 pub trait Symbol: 'static + Copy + Clone + Send + Sync + Hash + PartialEq + Eq + Display + Debug {
   type Location: Location<Self>;
 
@@ -360,6 +362,7 @@ pub type Matcher<Σ> = dyn Fn(&[Σ]) -> Result<Σ, MatchResult> + Send + Sync;
 
 pub(crate) enum Primary<ID, Σ: Symbol> {
   Term(String, Box<Matcher<Σ>>),
+  /// This corresponds to the so-called non-terminal character.
   Alias(ID),
   Seq(Vec<Syntax<ID, Σ>>),
   Or(Vec<Syntax<ID, Σ>>),

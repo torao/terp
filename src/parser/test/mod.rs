@@ -3,14 +3,16 @@ use itertools::Itertools;
 use crate::parser::{
   create_unmatched_label_actual, create_unmatched_label_prefix, Context, Event, EventBuffer, EventKind,
 };
-use crate::schema::chars::{self, ascii_alphabetic, ascii_digit, one_of_tokens, token};
-use crate::schema::{Location, Schema, Syntax};
+use crate::schema::chars::{self, ascii_alphabetic, ascii_digit, ch, one_of_chars, one_of_tokens, token};
+use crate::schema::{id, Location, Schema, Syntax};
 use crate::{Error, Result};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 
+mod context_free_grammer;
 mod json;
 mod or;
+mod user_guide;
 mod zero_repetition;
 
 #[test]
@@ -482,6 +484,56 @@ fn check_whether_possible_to_proceed() {
   parser.push_str("12").unwrap(); // completed
   parser.finish().unwrap();
   Events::new().begin("A").fragments("012").end().assert_eq(&events);
+}
+
+#[test]
+fn schema_named_syntax() {
+  // matches "♥A", "♠Q"...
+  let schema = Schema::new("Foo")
+    .define("CARD", id("SUIT") & id("RANK"))
+    .define("SUIT", one_of_chars("♠♣♦♥"))
+    .define("RANK", one_of_chars("A233456789XJQK"));
+
+  for suit in "♠♣♦♥".chars() {
+    for rank in "A233456789XJQK".chars() {
+      let sample = format!("{}{}", suit, rank);
+      let mut events = Vec::new();
+      let handler = |e: Event<_, _>| events.push(e);
+      let mut parser = Context::new(&schema, "CARD", handler).unwrap();
+      parser.push_str(&sample).unwrap();
+      parser.finish().unwrap();
+      Events::new()
+        .begin("CARD")
+        .begin("SUIT")
+        .fragments(&suit.to_string())
+        .end()
+        .begin("RANK")
+        .fragments(&rank.to_string())
+        .end()
+        .end()
+        .assert_eq(&events);
+    }
+  }
+}
+
+#[test]
+fn schema_named_syntax_recursive() {
+  // This will matches "terp", "(terp)", "((terp))", "(((terp)))", ...
+  let schema = Schema::new("Foo").define("P", (ch('(') & id("P") & ch(')')) | token("terp"));
+
+  for i in 0..=10 {
+    let sample = format!("{}terp{}", (0..i).map(|_| '(').collect::<String>(), (0..i).map(|_| ')').collect::<String>());
+    println!("sample: {}", sample);
+    let mut events = Vec::new();
+    let handler = |e: Event<_, _>| events.push(e);
+    let mut parser = Context::new(&schema, "P", handler).unwrap();
+    parser.push_str(&sample).unwrap();
+    parser.finish().unwrap();
+    let expected = (0..i).fold(Events::new().begin("P"), |es, _| es.fragments("(").begin("P"));
+    let expected = expected.fragments("terp");
+    let expected = (0..i).fold(expected, |es, _| es.end().fragments(")")).end();
+    expected.assert_eq(&events);
+  }
 }
 
 fn assert_prev_err<T: Debug + PartialEq>(r: Result<char, T>) {

@@ -33,6 +33,12 @@ fn char_location() {
 }
 
 #[test]
+fn one_of_chars() {
+  test_all(super::one_of_chars("0123"), "'0'|'1'|'2'|'3'", '\0', '\x7F', &|ch: char| ('0'..='3').contains(&ch));
+  test_all(super::one_of_chars(""), "", '\0', '\x7F', &|_: char| false);
+}
+
+#[test]
 fn ascii_digit() {
   test_all(super::ascii_digit(), "ASCII_DIGIT", '\0', '\x7F', &|ch: char| ch.is_ascii_digit());
 }
