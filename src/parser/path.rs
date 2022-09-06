@@ -1,17 +1,17 @@
 use crate::parser::{Event, EventBuffer, EventKind};
-use crate::schema::{Item, Location, MatchResult, Primary, Schema, Syntax};
+use crate::schema::{Location, MatchResult, Primary, Schema, Symbol, Syntax};
 use crate::{debug, Error, Result};
 use std::fmt::{Debug, Display, Write};
 use std::hash::Hash;
 
 #[derive(Clone, Debug)]
-pub(crate) struct Path<'s, ID, E: Item>
+pub(crate) struct Path<'s, ID, Σ: Symbol>
 where
   ID: Clone + Display + Debug + PartialEq + Eq + Hash,
 {
-  schema: &'s Schema<ID, E>,
-  event_buffer: EventBuffer<ID, E>,
-  stack: Vec<StackFrame<'s, ID, E>>,
+  schema: &'s Schema<ID, Σ>,
+  event_buffer: EventBuffer<ID, Σ>,
+  stack: Vec<StackFrame<'s, ID, Σ>>,
 
   // For variable watch during step execution.
   #[cfg(debug_assertions)]
@@ -20,11 +20,11 @@ where
   _eval: String,
 }
 
-impl<'s, ID, E: Item> Path<'s, ID, E>
+impl<'s, ID, Σ: Symbol> Path<'s, ID, Σ>
 where
   ID: Clone + Hash + Ord + Display + Debug,
 {
-  pub fn new(id: &ID, schema: &'s Schema<ID, E>) -> Result<E, Self> {
+  pub fn new(id: &ID, schema: &'s Schema<ID, Σ>) -> Result<Σ, Self> {
     let event_buffer = EventBuffer::new(16);
     let stack = Vec::with_capacity(16);
 
@@ -41,19 +41,19 @@ where
     Ok(path)
   }
 
-  pub fn current(&self) -> &State<'s, ID, E> {
+  pub fn current(&self) -> &State<'s, ID, Σ> {
     &self.stack.last().unwrap().state
   }
 
-  pub fn current_mut(&mut self) -> &mut State<'s, ID, E> {
+  pub fn current_mut(&mut self) -> &mut State<'s, ID, Σ> {
     &mut self.stack.last_mut().unwrap().state
   }
 
-  pub fn event_buffer(&self) -> &EventBuffer<ID, E> {
+  pub fn event_buffer(&self) -> &EventBuffer<ID, Σ> {
     &self.event_buffer
   }
 
-  pub fn event_buffer_mut(&mut self) -> &mut EventBuffer<ID, E> {
+  pub fn event_buffer_mut(&mut self) -> &mut EventBuffer<ID, Σ> {
     &mut self.event_buffer
   }
 
@@ -63,7 +63,7 @@ where
   /// Note that if called by matched=false, it may be overriden by matched=true at the upper layer
   /// of the stack.
   ///
-  pub fn move_to_next(&mut self, buffer: &[E], mut matched: bool, eof: bool) -> (bool, bool) {
+  pub fn move_to_next(&mut self, buffer: &[Σ], mut matched: bool, eof: bool) -> (bool, bool) {
     for i in 0..self.stack.len() {
       let stack_position = self.stack.len() - i - 1;
       let StackFrame { state, current, parent, _debug } = &mut self.stack[stack_position];
@@ -104,14 +104,14 @@ where
   }
 
   #[inline]
-  pub fn matches(&mut self, buffer: &[E], eof: bool) -> Result<E, Matching<ID, E>> {
+  pub fn matches(&mut self, buffer: &[Σ], eof: bool) -> Result<Σ, Matching<ID, Σ>> {
     let result = self.current_mut().matches(buffer, eof);
     #[cfg(debug_assertions)]
     {
       self._eval = format!(
         "{}(\"{}\") => {:?}",
         self.current().syntax(),
-        E::debug_symbols(
+        Σ::debug_symbols(
           &buffer[self.current().match_begin..std::cmp::min(buffer.len(), self.current().match_begin + 8)]
         ),
         result.as_ref().ok().map(|r| format!("{:?}", r)).unwrap_or_else(|| String::from("ERR"))
@@ -129,7 +129,7 @@ where
     debug_assert!(self.stack[0].current + 1 == self.stack[0].parent.len());
   }
 
-  pub fn can_merge(&self, other: &Path<'s, ID, E>) -> bool {
+  pub fn can_merge(&self, other: &Path<'s, ID, Σ>) -> bool {
     // points the same syntax
     debug_assert_eq!(self.stack[0].parent.len(), other.stack[0].parent.len()); // their root must be same
     if self.stack.len() != other.stack.len() {
@@ -149,13 +149,13 @@ where
     self.event_buffer == other.event_buffer
   }
 
-  pub fn stack_push_alias(&mut self, id: &ID) -> Result<E, ()> {
+  pub fn stack_push_alias(&mut self, id: &ID) -> Result<Σ, ()> {
     debug!("~ begined: {}", id);
     self.stack_push(Self::get_definition(id, self.schema)?);
     Ok(())
   }
 
-  pub fn stack_push(&mut self, seq: &'s Vec<Syntax<ID, E>>) {
+  pub fn stack_push(&mut self, seq: &'s Vec<Syntax<ID, Σ>>) {
     let mut sf = StackFrame::new(seq);
     if !self.stack.is_empty() {
       sf.state.location = self.current().location;
@@ -206,15 +206,15 @@ where
     }
   }
 
-  pub fn events_push(&mut self, e: Event<ID, E>) {
+  pub fn events_push(&mut self, e: Event<ID, Σ>) {
     self.event_buffer.push(e)
   }
 
-  pub fn events_flush_all_to<H: FnMut(Event<ID, E>)>(&mut self, handler: &mut H) {
+  pub fn events_flush_all_to<H: FnMut(Event<ID, Σ>)>(&mut self, handler: &mut H) {
     self.events_flush_forward_to(self.event_buffer.len(), handler)
   }
 
-  pub fn events_flush_forward_to<H: FnMut(Event<ID, E>)>(&mut self, n: usize, handler: &mut H) {
+  pub fn events_flush_forward_to<H: FnMut(Event<ID, Σ>)>(&mut self, n: usize, handler: &mut H) {
     self.event_buffer.flush_to(n, handler)
   }
 
@@ -232,7 +232,7 @@ where
     }
   }
 
-  fn get_definition(id: &ID, schema: &'s Schema<ID, E>) -> Result<E, &'s Vec<Syntax<ID, E>>> {
+  fn get_definition(id: &ID, schema: &'s Schema<ID, Σ>) -> Result<Σ, &'s Vec<Syntax<ID, Σ>>> {
     if let Some(Syntax { primary: Primary::Seq(seq), repetition, .. }) = schema.get(id) {
       debug_assert!(!seq.is_empty());
       debug_assert!(*repetition.start() == 1 && *repetition.end() == 1);
@@ -243,7 +243,7 @@ where
   }
 }
 
-impl<'s, ID, E: Item> Display for Path<'s, ID, E>
+impl<'s, ID, Σ: Symbol> Display for Path<'s, ID, Σ>
 where
   ID: Clone + Hash + Ord + Display + Debug,
 {
@@ -261,22 +261,22 @@ where
 }
 
 #[derive(Clone, Debug)]
-struct StackFrame<'s, ID, E: Item>
+struct StackFrame<'s, ID, Σ: Symbol>
 where
   ID: Clone + Display + Debug,
 {
-  state: State<'s, ID, E>,
-  parent: &'s Vec<Syntax<ID, E>>,
+  state: State<'s, ID, Σ>,
+  parent: &'s Vec<Syntax<ID, Σ>>,
   current: usize,
 
   _debug: String,
 }
 
-impl<'s, ID, E: Item> StackFrame<'s, ID, E>
+impl<'s, ID, Σ: Symbol> StackFrame<'s, ID, Σ>
 where
   ID: Clone + Hash + Ord + Display + Debug,
 {
-  pub fn new(parent: &'s Vec<Syntax<ID, E>>) -> Self {
+  pub fn new(parent: &'s Vec<Syntax<ID, Σ>>) -> Self {
     debug_assert!(!parent.is_empty());
     let state = State::new(&parent[0]);
     Self { state, parent, current: 0, _debug: format!("{}", parent[0]) }
@@ -286,39 +286,39 @@ where
 /// The `Cursor` advances step by step, evaluating [`Syntax`] matches.
 ///
 #[derive(Clone, Debug)]
-pub struct State<'s, ID, E: Item>
+pub struct State<'s, ID, Σ: Symbol>
 where
   ID: Clone + Display + Debug,
 {
-  pub location: E::Location,
+  pub location: Σ::Location,
   pub match_begin: usize,
   pub match_length: usize,
   pub appearances: usize,
 
   /// The [`Syntax`] must be `Syntax::Seq`.
-  syntax: &'s Syntax<ID, E>,
+  syntax: &'s Syntax<ID, Σ>,
 }
 
-impl<'s, ID, E: 'static + Item> State<'s, ID, E>
+impl<'s, ID, Σ: 'static + Symbol> State<'s, ID, Σ>
 where
   ID: Clone + Display + Debug + PartialEq + Eq + Hash,
 {
-  pub fn new(syntax: &'s Syntax<ID, E>) -> Self {
-    Self { location: E::Location::default(), match_begin: 0, match_length: 0, appearances: 0, syntax }
+  pub fn new(syntax: &'s Syntax<ID, Σ>) -> Self {
+    Self { location: Σ::Location::default(), match_begin: 0, match_length: 0, appearances: 0, syntax }
   }
 
-  pub fn syntax(&self) -> &'s Syntax<ID, E> {
+  pub fn syntax(&self) -> &'s Syntax<ID, Σ> {
     self.syntax
   }
 
-  fn matches(&mut self, buffer: &[E], eof: bool) -> Result<E, Matching<ID, E>> {
+  fn matches(&mut self, buffer: &[Σ], eof: bool) -> Result<Σ, Matching<ID, Σ>> {
     debug_assert!(buffer.len() >= self.match_begin + self.match_length);
 
     let items = &buffer[self.match_begin..];
     let reps = &self.syntax.repetition;
     debug_assert!(self.appearances <= *reps.end());
     if !self.can_repeate_more() {
-      debug!("~ matched: {}({}) -> no data", self.syntax(), E::debug_symbols(items));
+      debug!("~ matched: {}({}) -> no data", self.syntax(), Σ::debug_symbols(items));
       return Ok(Matching::Match(0, None));
     }
 
@@ -338,11 +338,11 @@ where
       MatchResult::Match(length) => {
         self.match_length = length;
         let values = self.extract(buffer).to_vec();
-        debug!("~ matched: {}({}) -> [{}]", self.syntax(), E::debug_symbols(items), E::debug_symbols(&values));
+        debug!("~ matched: {}({}) -> [{}]", self.syntax(), Σ::debug_symbols(items), Σ::debug_symbols(&values));
         Matching::Match(length, Some(self.event(EventKind::Fragments(values))))
       }
       MatchResult::Unmatch => {
-        debug!("~ unmatched: {}({})", self.syntax(), E::debug_symbols(items));
+        debug!("~ unmatched: {}({})", self.syntax(), Σ::debug_symbols(items));
         Matching::Unmatch
       }
       MatchResult::MatchAndCanAcceptMore(_) | MatchResult::UnmatchAndCanAcceptMore => Matching::More,
@@ -360,7 +360,7 @@ where
     }
   }
 
-  fn proceed_along_buffer(&mut self, buffer: &[E]) {
+  fn proceed_along_buffer(&mut self, buffer: &[Σ]) {
     if self.match_length > 0 {
       self.location.increment_with_seq(self.extract(buffer));
       self.match_begin += self.match_length;
@@ -368,21 +368,21 @@ where
     }
   }
 
-  pub fn extract<'a>(&self, buffer: &'a [E]) -> &'a [E] {
+  pub fn extract<'a>(&self, buffer: &'a [Σ]) -> &'a [Σ] {
     &buffer[self.match_begin..][..self.match_length]
   }
 
-  pub fn event(&self, kind: EventKind<ID, E>) -> Event<ID, E> {
+  pub fn event(&self, kind: EventKind<ID, Σ>) -> Event<ID, Σ> {
     Event { location: self.location, kind }
   }
 }
 
 #[derive(Debug)]
-pub enum Matching<ID, E: Item>
+pub enum Matching<ID, Σ: Symbol>
 where
   ID: Clone + Display + Debug + PartialEq + Eq + Hash,
 {
-  Match(usize, Option<Event<ID, E>>),
+  Match(usize, Option<Event<ID, Σ>>),
   More,
   Unmatch,
 }

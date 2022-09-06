@@ -1,4 +1,4 @@
-use crate::schema::{Item, MatchResult, Syntax};
+use crate::schema::{MatchResult, Symbol, Syntax};
 use crate::Result;
 use std::collections::HashSet;
 use std::hash::Hash;
@@ -7,7 +7,7 @@ use std::ops::RangeInclusive;
 #[cfg(test)]
 mod test;
 
-pub fn id<ID, E: Item>(id: ID) -> Syntax<ID, E> {
+pub fn id<ID, Σ: Symbol>(id: ID) -> Syntax<ID, Σ> {
   Syntax::from_id(id)
 }
 
@@ -15,8 +15,8 @@ pub fn id_str<S: Into<String>>(id: S) -> Syntax<String, char> {
   Syntax::from_id_str(id)
 }
 
-pub fn single<ID, E: Item>(item: E) -> Syntax<ID, E> {
-  Syntax::from_fn(&E::debug_symbol(item), move |values: &[E]| -> Result<E, MatchResult> {
+pub fn single<ID, Σ: Symbol>(item: Σ) -> Syntax<ID, Σ> {
+  Syntax::from_fn(&Σ::debug_symbol(item), move |values: &[Σ]| -> Result<Σ, MatchResult> {
     if values.is_empty() {
       Ok(MatchResult::UnmatchAndCanAcceptMore)
     } else if values[0] == item {
@@ -27,17 +27,19 @@ pub fn single<ID, E: Item>(item: E) -> Syntax<ID, E> {
   })
 }
 
-pub fn range<ID, E: Item + PartialOrd>(r: RangeInclusive<E>) -> Syntax<ID, E> {
-  let label = format!("{{{},{}}}", E::debug_symbol(*r.start()), E::debug_symbol(*r.end()));
+pub fn range<ID, Σ: Symbol + PartialOrd>(r: RangeInclusive<Σ>) -> Syntax<ID, Σ> {
+  let label = format!("{{{},{}}}", Σ::debug_symbol(*r.start()), Σ::debug_symbol(*r.end()));
   range_with_label(&label, r)
 }
 
-pub fn range_with_label<ID, E: Item + PartialOrd>(label: &str, r: RangeInclusive<E>) -> Syntax<ID, E> {
+pub fn range_with_label<ID, Σ: Symbol + PartialOrd>(label: &str, r: RangeInclusive<Σ>) -> Syntax<ID, Σ> {
   any_of_ranges_with_label(label, vec![r])
 }
 
-pub fn any_of_ranges_with_label<ID, E: Item + PartialOrd>(label: &str, rs: Vec<RangeInclusive<E>>) -> Syntax<ID, E> {
-  Syntax::from_fn(label, move |values: &[E]| -> Result<E, MatchResult> {
+pub fn any_of_ranges_with_label<ID, Σ: Symbol + PartialOrd>(
+  label: &str, rs: Vec<RangeInclusive<Σ>>,
+) -> Syntax<ID, Σ> {
+  Syntax::from_fn(label, move |values: &[Σ]| -> Result<Σ, MatchResult> {
     if values.is_empty() {
       Ok(MatchResult::UnmatchAndCanAcceptMore)
     } else if rs.iter().any(|r| r.contains(&values[0])) {
@@ -48,9 +50,9 @@ pub fn any_of_ranges_with_label<ID, E: Item + PartialOrd>(label: &str, rs: Vec<R
   })
 }
 
-pub fn seq<ID, E: Item>(items: &[E]) -> Syntax<ID, E> {
+pub fn seq<ID, Σ: Symbol>(items: &[Σ]) -> Syntax<ID, Σ> {
   let items = items.to_vec();
-  Syntax::from_fn(&E::debug_symbols(&items), move |buffer: &[E]| -> Result<E, MatchResult> {
+  Syntax::from_fn(&Σ::debug_symbols(&items), move |buffer: &[Σ]| -> Result<Σ, MatchResult> {
     let min = std::cmp::min(items.len(), buffer.len());
     for (i, value) in buffer.iter().take(min).enumerate() {
       if *value != items[i] {
@@ -61,13 +63,13 @@ pub fn seq<ID, E: Item>(items: &[E]) -> Syntax<ID, E> {
   })
 }
 
-pub fn one_of<ID, E: Item + Hash>(items: &[E]) -> Syntax<ID, E> {
-  let label = items.iter().map(|i| E::debug_symbol(*i)).collect::<Vec<_>>().join("|");
+pub fn one_of<ID, Σ: Symbol + Hash>(items: &[Σ]) -> Syntax<ID, Σ> {
+  let label = items.iter().map(|i| Σ::debug_symbol(*i)).collect::<Vec<_>>().join("|");
   let items = items.iter().fold(HashSet::with_capacity(items.len()), |mut items, item| {
     items.insert(*item);
     items
   });
-  Syntax::from_fn(&label, move |buffer: &[E]| -> Result<E, MatchResult> {
+  Syntax::from_fn(&label, move |buffer: &[Σ]| -> Result<Σ, MatchResult> {
     if buffer.is_empty() {
       Ok(MatchResult::UnmatchAndCanAcceptMore)
     } else if items.contains(&buffer[0]) {
@@ -78,10 +80,10 @@ pub fn one_of<ID, E: Item + Hash>(items: &[E]) -> Syntax<ID, E> {
   })
 }
 
-pub fn one_of_seqs<ID, E: Item + PartialEq>(items: &[Vec<E>]) -> Syntax<ID, E> {
-  let label = items.iter().map(|i| E::debug_symbols(i)).collect::<Vec<_>>().join("|");
+pub fn one_of_seqs<ID, Σ: Symbol + PartialEq>(items: &[Vec<Σ>]) -> Syntax<ID, Σ> {
+  let label = items.iter().map(|i| Σ::debug_symbols(i)).collect::<Vec<_>>().join("|");
   let items = items.iter().map(|i| i.to_vec()).collect::<Vec<_>>();
-  Syntax::from_fn(&label, move |buffer: &[E]| -> Result<E, MatchResult> {
+  Syntax::from_fn(&label, move |buffer: &[Σ]| -> Result<Σ, MatchResult> {
     use MatchResult::*;
     let result = items
       .iter()
