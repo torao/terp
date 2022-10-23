@@ -1,4 +1,4 @@
-use crate::schema::{Item, Location, Primary, Schema, Syntax};
+use crate::schema::{Location, Primary, Schema, Symbol, Syntax};
 use crate::{debug, Error, Result};
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
@@ -13,25 +13,25 @@ pub use event::*;
 #[cfg(test)]
 pub mod test;
 
-pub struct Context<'s, ID, E: Item, H: FnMut(Event<ID, E>)>
+pub struct Context<'s, ID, Σ: Symbol, H: FnMut(Event<ID, Σ>)>
 where
   ID: Clone + Hash + Eq + Ord + Display + Debug + Send + Sync,
 {
   id: ID,
   event_handler: H,
-  location: E::Location,
-  buffer: Vec<E>,
+  location: Σ::Location,
+  buffer: Vec<Σ>,
   offset_of_buffer_head: u64,
-  ongoing: Vec<Path<'s, ID, E>>,
-  prev_completed: Vec<Path<'s, ID, E>>,
-  prev_unmatched: Vec<Path<'s, ID, E>>,
+  ongoing: Vec<Path<'s, ID, Σ>>,
+  prev_completed: Vec<Path<'s, ID, Σ>>,
+  prev_unmatched: Vec<Path<'s, ID, Σ>>,
 }
 
-impl<'s, ID, E: 'static + Item, H: FnMut(Event<ID, E>)> Context<'s, ID, E, H>
+impl<'s, ID, Σ: 'static + Symbol, H: FnMut(Event<ID, Σ>)> Context<'s, ID, Σ, H>
 where
   ID: 's + Clone + Hash + Eq + Ord + Display + Debug + Send + Sync,
 {
-  pub fn new(schema: &'s Schema<ID, E>, id: ID, event_handler: H) -> Result<E, Self> {
+  pub fn new(schema: &'s Schema<ID, Σ>, id: ID, event_handler: H) -> Result<Σ, Self> {
     let buffer = Vec::with_capacity(1024);
 
     let mut first = Path::new(&id, schema)?;
@@ -39,7 +39,7 @@ where
     let mut ongoing = Vec::with_capacity(16);
     ongoing.push(first);
 
-    let location = E::Location::default();
+    let location = Σ::Location::default();
     let prev_completed = Vec::with_capacity(16);
     let prev_unmatched = Vec::with_capacity(16);
     Ok(Self { id, event_handler, location, buffer, offset_of_buffer_head: 0, ongoing, prev_completed, prev_unmatched })
@@ -56,15 +56,15 @@ where
     &self.id
   }
 
-  pub fn push(&mut self, item: E) -> Result<E, ()> {
+  pub fn push(&mut self, item: Σ) -> Result<Σ, ()> {
     let buffer = [item];
     self.push_seq(&buffer)
   }
 
-  pub fn push_seq(&mut self, items: &[E]) -> Result<E, ()> {
+  pub fn push_seq(&mut self, items: &[Σ]) -> Result<Σ, ()> {
     debug!(
       "PUSH: {:?}, buf_size={}, {}",
-      E::debug_symbols(items),
+      Σ::debug_symbols(items),
       self.buffer.len(),
       if cfg!(feature = "concurrent") { "concurrent" } else { "serial" }
     );
@@ -97,7 +97,7 @@ where
     Ok(())
   }
 
-  pub fn finish(mut self) -> Result<E, ()> {
+  pub fn finish(mut self) -> Result<Σ, ()> {
     debug!("FINISH");
 
     self.check_for_previous_error()?;
@@ -124,12 +124,12 @@ where
     }
   }
 
-  fn proceed(&mut self, eof: bool) -> Result<E, ()> {
+  fn proceed(&mut self, eof: bool) -> Result<Σ, ()> {
     if !eof {
       self.prev_completed.truncate(0);
       self.prev_unmatched.truncate(0);
     }
-    let mut evaluating: Vec<Path<'s, ID, E>> = Vec::with_capacity(self.ongoing.len());
+    let mut evaluating: Vec<Path<'s, ID, Σ>> = Vec::with_capacity(self.ongoing.len());
     for path in self.ongoing.drain(..) {
       evaluating.append(&mut Self::move_ongoing_paths_to_next_term(path)?);
     }
@@ -171,9 +171,9 @@ where
     Ok(())
   }
 
-  fn proceed_on_path(mut path: Path<'s, ID, E>, buffer: &[E], eof: bool) -> Result<E, NextPaths<'s, ID, E>> {
+  fn proceed_on_path(mut path: Path<'s, ID, Σ>, buffer: &[Σ], eof: bool) -> Result<Σ, NextPaths<'s, ID, Σ>> {
     debug_assert!(matches!(path.current().syntax().primary, Primary::Term(..)));
-    debug!("~ === proceed_on_path({}, {}, {})", path, E::debug_symbols(&buffer[path.current().match_begin..]), eof);
+    debug!("~ === proceed_on_path({}, {}, {})", path, Σ::debug_symbols(&buffer[path.current().match_begin..]), eof);
 
     let mut next = NextPaths {
       need_to_be_reevaluated: Vec::with_capacity(1),
@@ -220,7 +220,7 @@ where
     Ok(next)
   }
 
-  fn move_ongoing_paths_to_next_term(path: Path<'s, ID, E>) -> Result<E, Vec<Path<'s, ID, E>>> {
+  fn move_ongoing_paths_to_next_term(path: Path<'s, ID, Σ>) -> Result<Σ, Vec<Path<'s, ID, Σ>>> {
     let mut ongoing = vec![path];
     let mut term_reached = Vec::with_capacity(ongoing.len());
     while let Some(mut eval_path) = ongoing.pop() {
@@ -273,7 +273,7 @@ where
     }
   }
 
-  fn merge_paths(paths: &mut Vec<Path<ID, E>>) {
+  fn merge_paths(paths: &mut Vec<Path<ID, Σ>>) {
     for i in 0..paths.len() {
       let mut j = i + 1;
       while j < paths.len() {
@@ -287,7 +287,7 @@ where
     }
   }
 
-  fn push_unmatched(&mut self, path: Path<'s, ID, E>) {
+  fn push_unmatched(&mut self, path: Path<'s, ID, Σ>) {
     let save = if let Some(current) = self.prev_unmatched.last() {
       match path.current().location.cmp(&current.current().location) {
         Ordering::Greater => {
@@ -327,7 +327,7 @@ where
     }
   }
 
-  fn check_whether_possible_to_proceed(&mut self) -> Result<E, ()> {
+  fn check_whether_possible_to_proceed(&mut self) -> Result<Σ, ()> {
     self.check_for_previous_error()?;
 
     debug_assert!(!self.ongoing.is_empty() || !self.prev_completed.is_empty() || self.prev_unmatched.is_empty());
@@ -346,7 +346,7 @@ where
     }
   }
 
-  fn check_whether_unmatch_confirmed(&mut self) -> Result<E, ()> {
+  fn check_whether_unmatch_confirmed(&mut self) -> Result<Σ, ()> {
     debug_assert!(!self.ongoing.is_empty() || !self.prev_completed.is_empty() || !self.prev_unmatched.is_empty());
     if self.ongoing.is_empty() && self.prev_completed.is_empty() {
       self.error(self.error_unmatch(&self.prev_unmatched))
@@ -355,7 +355,7 @@ where
     }
   }
 
-  fn check_for_previous_error(&self) -> Result<E, ()> {
+  fn check_for_previous_error(&self) -> Result<Σ, ()> {
     if self.ongoing.is_empty() && self.prev_completed.is_empty() && self.prev_unmatched.is_empty() {
       Err(Error::Previous)
     } else {
@@ -363,14 +363,14 @@ where
     }
   }
 
-  fn error_unmatch(&self, expecteds: &[Path<ID, E>]) -> Error<E> {
+  fn error_unmatch(&self, expecteds: &[Path<ID, Σ>]) -> Error<Σ> {
     let location = expecteds.first().map(|p| p.current().location).unwrap_or(self.location);
     let expected_syntaxes = expecteds.iter().map(|p| p.to_string()).collect::<Vec<_>>();
     let (prefix, expecteds, actual) = create_unmatched_labels(&self.buffer, self.offset_of_buffer_head, expecteds);
     Error::Unmatched { location, prefix, expecteds, expected_syntaxes, actual }
   }
 
-  fn error_eof_expected(&self, completed: &[Path<ID, E>]) -> Error<E> {
+  fn error_eof_expected(&self, completed: &[Path<ID, Σ>]) -> Error<Σ> {
     let location = completed.first().map(|p| p.current().location).unwrap_or(self.location);
     let match_length = completed.first().map(|p| p.current().match_begin).unwrap_or(self.buffer.len());
     let prefix = create_unmatched_label_prefix(&self.buffer, self.offset_of_buffer_head, match_length);
@@ -379,7 +379,7 @@ where
     Error::Unmatched { location, prefix, expecteds: vec![expected], expected_syntaxes: vec![], actual }
   }
 
-  fn error<T>(&mut self, err: Error<E>) -> Result<E, T> {
+  fn error<T>(&mut self, err: Error<Σ>) -> Result<Σ, T> {
     self.ongoing.truncate(0);
     self.prev_unmatched.truncate(0);
     self.prev_completed.truncate(0);
@@ -387,8 +387,8 @@ where
   }
 }
 
-fn create_unmatched_labels<ID, E: Item>(
-  buffer: &[E], buf_offset: u64, expecteds: &[Path<ID, E>],
+fn create_unmatched_labels<ID, Σ: Symbol>(
+  buffer: &[Σ], buf_offset: u64, expecteds: &[Path<ID, Σ>],
 ) -> (String, Vec<String>, String)
 where
   ID: Clone + Display + Debug + PartialEq + Ord + Eq + Hash,
@@ -409,24 +409,24 @@ where
 const ELLAPSE_LENGTH: usize = 3;
 const EOF_SYMBOL: &str = "EOF";
 
-fn create_unmatched_label_prefix<E: Item>(buffer: &[E], buf_offset: u64, match_length: usize) -> String {
+fn create_unmatched_label_prefix<Σ: Symbol>(buffer: &[Σ], buf_offset: u64, match_length: usize) -> String {
   debug_assert!(match_length <= buffer.len());
-  let sample_length = E::SAMPLING_UNIT_AT_ERROR;
+  let sample_length = Σ::SAMPLING_UNIT_AT_ERROR;
   let sample_end = match_length;
   let sample_begin = sample_end - std::cmp::min(sample_length, sample_end);
   let ellapse_length = std::cmp::min(ELLAPSE_LENGTH as u64, buf_offset + sample_begin as u64) as usize;
   let ellapse = (0..ellapse_length).map(|_| ".").collect::<String>();
-  let sample = E::debug_symbols(&buffer[sample_begin..sample_end]);
+  let sample = Σ::debug_symbols(&buffer[sample_begin..sample_end]);
   format!("{}{}", ellapse, sample)
 }
 
-fn create_unmatched_label_actual<E: Item>(buffer: &[E], match_length: usize) -> String {
-  let sample_length = E::SAMPLING_UNIT_AT_ERROR;
+fn create_unmatched_label_actual<Σ: Symbol>(buffer: &[Σ], match_length: usize) -> String {
+  let sample_length = Σ::SAMPLING_UNIT_AT_ERROR;
   if match_length < buffer.len() {
-    let target = E::debug_symbol(buffer[match_length]);
+    let target = Σ::debug_symbol(buffer[match_length]);
     if match_length + 1 < buffer.len() {
       let suffix_length = std::cmp::min(sample_length, buffer.len() - match_length - 1);
-      let suffix = E::debug_symbols(&buffer[match_length + 1..][..suffix_length]);
+      let suffix = Σ::debug_symbols(&buffer[match_length + 1..][..suffix_length]);
       format!("[{}]{}...", target, suffix)
     } else {
       format!("[{}]...", target)
@@ -446,12 +446,12 @@ where
   }
 }
 
-struct NextPaths<'s, ID, E: Item>
+struct NextPaths<'s, ID, Σ: Symbol>
 where
   ID: 's + Clone + Hash + Eq + Ord + Display + Debug + Send + Sync,
 {
-  pub need_to_be_reevaluated: Vec<Path<'s, ID, E>>,
-  pub ongoing: Vec<Path<'s, ID, E>>,
-  pub unmatched: Option<Path<'s, ID, E>>,
-  pub completed: Option<Path<'s, ID, E>>,
+  pub need_to_be_reevaluated: Vec<Path<'s, ID, Σ>>,
+  pub ongoing: Vec<Path<'s, ID, Σ>>,
+  pub unmatched: Option<Path<'s, ID, Σ>>,
+  pub completed: Option<Path<'s, ID, Σ>>,
 }

@@ -1,4 +1,4 @@
-use crate::schema::{any_of_ranges_with_label, one_of_seqs, range_with_label, seq, single, Syntax};
+use crate::schema::{any_of_ranges_with_label, one_of, one_of_seqs, range_with_label, seq, single, Syntax};
 use std::fmt::{Debug, Display};
 
 #[cfg(test)]
@@ -48,6 +48,11 @@ impl Display for Location {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     write!(f, "({},{})", self.lines + 1, self.columns + 1)
   }
+}
+
+#[inline]
+pub fn one_of_chars<ID: Debug>(chars: &str) -> Syntax<ID, char> {
+  one_of(&chars.chars().collect::<Vec<_>>())
 }
 
 #[inline]

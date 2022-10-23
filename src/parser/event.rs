@@ -4,35 +4,46 @@ use std::{
   hash::Hash,
 };
 
-use crate::schema::Item;
+use crate::schema::Symbol;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct Event<ID, E: Item>
+pub struct Event<ID, Σ: Symbol>
 where
   ID: Clone + Display + Debug + PartialEq + Eq + Hash,
 {
-  pub location: E::Location,
-  pub kind: EventKind<ID, E>,
+  pub location: Σ::Location,
+  pub kind: EventKind<ID, Σ>,
 }
 
-impl<ID, E: Item> Event<ID, E> where ID: Clone + Display + Debug + PartialEq + Eq + Hash {}
+impl<ID, Σ: Symbol> Event<ID, Σ>
+where
+  ID: Clone + Display + Debug + PartialEq + Eq + Hash,
+{
+  pub fn normalize(events: &[Event<ID, Σ>]) -> Vec<Event<ID, Σ>> {
+    let mut buffer = EventBuffer::new(events.len());
+    for e in events {
+      buffer.push(e.clone());
+    }
+    buffer.events
+  }
+}
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub enum EventKind<ID, E: Item>
+pub enum EventKind<ID, Σ: Symbol>
 where
   ID: Clone + Debug,
 {
   Begin(ID),
   End(ID),
-  Fragments(Vec<E>),
+  Fragments(Vec<Σ>),
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct EventBuffer<ID, E: Item>
+pub(crate) struct EventBuffer<ID, Σ: Symbol>
 where
   ID: Clone + Display + Debug + PartialEq + Eq + Hash,
 {
-  events: Vec<Event<ID, E>>,
+  events: Vec<Event<ID, Σ>>,
   ignore: HashSet<ID>,
 
   // to verify Begin/End conbinations
@@ -40,7 +51,7 @@ where
   _event_stack: Vec<ID>,
 }
 
-impl<ID, E: Item> EventBuffer<ID, E>
+impl<ID, Σ: Symbol> EventBuffer<ID, Σ>
 where
   ID: Clone + Display + Debug + PartialEq + Eq + Hash,
 {
@@ -63,7 +74,7 @@ where
     }
   }
 
-  pub fn push(&mut self, mut e: Event<ID, E>) {
+  pub fn push(&mut self, mut e: Event<ID, Σ>) {
     match (&mut e, self.events.last_mut()) {
       (Event { kind: EventKind::Fragments(items), .. }, Some(Event { kind: EventKind::Fragments(current), .. })) => {
         // append items to buffer tail Fragment's sequence
@@ -100,14 +111,12 @@ where
   }
 
   pub fn normalize(mut self) -> Self {
-    for e in self.events.drain(..).collect::<Vec<_>>() {
-      self.events.push(e);
-    }
+    self.events = Event::normalize(&self.events);
     self.events.shrink_to_fit();
     self
   }
 
-  pub fn flush_to<H: FnMut(Event<ID, E>)>(&mut self, n: usize, handler: &mut H) {
+  pub fn flush_to<H: FnMut(Event<ID, Σ>)>(&mut self, n: usize, handler: &mut H) {
     for e in self.events.drain(..n) {
       (handler)(e);
     }
@@ -124,7 +133,7 @@ where
   }
 }
 
-impl<ID, E: Item> PartialEq for EventBuffer<ID, E>
+impl<ID, Σ: Symbol> PartialEq for EventBuffer<ID, Σ>
 where
   ID: Clone + Display + Debug + PartialEq + Eq + Hash,
 {

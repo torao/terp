@@ -1,4 +1,4 @@
-use crate::schema::chars::{ch, token};
+use crate::schema::chars::{ch, one_of_chars, token};
 use crate::schema::{id, one_of, range, Schema};
 use std::fmt::Display;
 
@@ -48,7 +48,8 @@ impl Display for ID {
 }
 
 /// The JavaScript Object Notation (JSON) Data Interchange Format
-/// https://datatracker.ietf.org/doc/html/rfc8259
+/// <https://datatracker.ietf.org/doc/html/rfc8259>
+///
 pub fn schema() -> Schema<ID, char> {
   use ID::*;
   Schema::new("JSON")
@@ -59,7 +60,7 @@ pub fn schema() -> Schema<ID, char> {
     .define(EndObject, id(WS) & ch('}') & id(WS))
     .define(NameSeparator, id(WS) & ch(':') & id(WS))
     .define(ValueSeparator, id(WS) & ch(',') & id(WS))
-    .define(WS, one_of(&[' ', '\t', '\x0A', '\x0D']) * (0..))
+    .define(WS, one_of_chars(" \t\x0A\x0D") * (0..))
     .define(Value, id(False) | id(Null) | id(True) | id(Object) | id(Array) | id(Number) | id(String))
     .define(False, token("false"))
     .define(Null, token("null"))
@@ -81,10 +82,7 @@ pub fn schema() -> Schema<ID, char> {
     .define(Plus, ch('+'))
     .define(Zero, ch('0'))
     .define(String, id(QuotationMark) & (id(Char) * (0..)) & id(QuotationMark))
-    .define(
-      Char,
-      id(Unescaped) | id(Escape) & (one_of(&['\"', '\\', '/', 'b', 'f', 'n', 'r', 't']) | (ch('u') & (id(HexDig) * 4))),
-    )
+    .define(Char, id(Unescaped) | id(Escape) & (one_of_chars("\"\\/bfnrt") | (ch('u') & (id(HexDig) * 4))))
     .define(Escape, ch('\\'))
     .define(QuotationMark, ch('\"'))
     .define(Unescaped, range('\x20'..='\x21') | range('\x23'..='\x5B') | range('\x5D'..='\u{10FFFF}'))

@@ -1,5 +1,5 @@
 use crate::schema::chars::Location;
-use crate::schema::{Item, Location as L, MatchResult, Matcher, Primary, Syntax};
+use crate::schema::{Location as L, MatchResult, Matcher, Primary, Symbol, Syntax};
 
 #[test]
 fn char_location() {
@@ -30,6 +30,12 @@ fn char_location() {
   let l2 = l;
   assert_equals(&l, &l2);
   assert_equals(&l, &l.clone());
+}
+
+#[test]
+fn one_of_chars() {
+  test_all(super::one_of_chars("0123"), "'0'|'1'|'2'|'3'", '\0', '\x7F', &|ch: char| ('0'..='3').contains(&ch));
+  test_all(super::one_of_chars(""), "", '\0', '\x7F', &|_: char| false);
 }
 
 #[test]
@@ -66,7 +72,7 @@ fn test_all(syntax: Syntax<String, char>, label: &str, t0: char, t1: char, pred:
   }
 }
 
-fn get_matcher<ID, E: Item>(s: Syntax<ID, E>) -> Box<Matcher<E>> {
+fn get_matcher<ID, Σ: Symbol>(s: Syntax<ID, Σ>) -> Box<Matcher<Σ>> {
   match s {
     Syntax { primary: Primary::Term(_, matcher), .. } => matcher,
     _ => panic!(),

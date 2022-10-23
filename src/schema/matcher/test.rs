@@ -1,4 +1,4 @@
-use crate::schema::{Item, MatchResult, Primary, Syntax};
+use crate::schema::{MatchResult, Primary, Symbol, Syntax};
 use crate::Result;
 
 #[test]
@@ -60,7 +60,7 @@ fn assert_match_str<ID>(syntax: &Syntax<ID, char>, values: &str, expected: Resul
   assert_match(syntax, &values, expected);
 }
 
-fn assert_match<ID, E: Item>(syntax: &Syntax<ID, E>, values: &[E], expected: Result<E, MatchResult>) {
+fn assert_match<ID, Σ: Symbol>(syntax: &Syntax<ID, Σ>, values: &[Σ], expected: Result<Σ, MatchResult>) {
   let result = if let Syntax { primary: Primary::Term(_, matcher), .. } = syntax { matcher(values) } else { panic!() };
   assert_eq!(expected, result);
 }
