@@ -80,7 +80,7 @@ fn hex_digit() {
 
 fn parse(id: ID, json_text: &str) -> Vec<Event<ID, char>> {
   let mut events = Vec::with_capacity(256);
-  let handler = |e: Event<ID, char>| events.push(e);
+  let handler = |e: &Event<ID, char>| events.push(e.clone());
   let schema = schema();
   let mut parser = Context::new(&schema, id, handler).unwrap();
   parser.push_str(json_text).unwrap();

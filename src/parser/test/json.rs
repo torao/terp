@@ -59,9 +59,9 @@ fn rfc8259_empty_object() {
 #[test]
 fn rfc8259_sample() {
   let mut events = Vec::new();
-  let event_handler = |e: Event<ID, char>| {
+  let event_handler = |e: &Event<ID, char>| {
     println!("> {:?}", e);
-    events.push(e);
+    events.push(e.clone());
   };
   let schema = self::schema();
   let mut parser = Context::new(&schema, ID::JsonText, event_handler).unwrap().ignore_events_for(IGNORE);
@@ -201,9 +201,9 @@ fn rfc8259_string() {
   let sample = r#""foo""#;
 
   let mut events = Vec::new();
-  let event_handler = |e: Event<ID, char>| {
+  let event_handler = |e: &Event<ID, char>| {
     println!("> {:?}", e);
-    events.push(e);
+    events.push(e.clone());
   };
   let schema = self::schema();
   let mut parser = Context::new(&schema, ID::String, event_handler).unwrap();
@@ -241,9 +241,9 @@ fn rfc8259_string_ignore_chars() {
   let sample = r#""foo""#;
 
   let mut events = Vec::new();
-  let event_handler = |e: Event<ID, char>| {
+  let event_handler = |e: &Event<ID, char>| {
     println!("> {:?}", e);
-    events.push(e);
+    events.push(e.clone());
   };
   let schema = self::schema();
   let mut parser =
@@ -269,7 +269,7 @@ fn various_json_files() {
   for (name, path) in files("ok-", &[".json", ".json.txt"]).into_iter() {
     eprintln!("----------- [{}] ------------", name);
     let content = fs::read_to_string(&path).unwrap();
-    let event_handler = |_: Event<ID, char>| ();
+    let event_handler = |_: &Event<ID, char>| ();
     let mut parser = Context::new(&schema, ID::JsonText, event_handler).unwrap();
     parser.push_str(&content).unwrap_or_else(|e| panic!("{:?}: for parsing {}", e, name));
     // for ch in content.chars() {
@@ -284,9 +284,9 @@ where
   ID: Clone + Display + Debug + PartialEq + Eq + Hash,
 {
   let mut events = Vec::new();
-  let event_handler = |e: Event<ID, char>| {
+  let event_handler = |e: &Event<ID, char>| {
     println!("> {:?}", e);
-    events.push(e);
+    events.push(e.clone());
   };
   let schema = self::schema();
   let mut parser = Context::new(&schema, ID::JsonText, event_handler).unwrap().ignore_events_for(IGNORE);

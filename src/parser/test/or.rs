@@ -8,9 +8,9 @@ fn or() {
   let schema = Schema::new("Foo").define("A", a);
 
   let mut events = Vec::new();
-  let event_handler = |e: Event<_, _>| {
+  let event_handler = |e: &Event<_, _>| {
     println!("> {:?}", e);
-    events.push(e);
+    events.push(e.clone());
   };
   let mut parser = Context::new(&schema, "A", event_handler).unwrap();
   for ch in "A09;".chars() {

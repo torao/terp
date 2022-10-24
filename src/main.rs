@@ -19,7 +19,7 @@ const SAMPLE: &str = r#"
 }"#;
 
 fn main() {
-  let event_handler = |_: Event<ID, char>| ();
+  let event_handler = |_: &Event<ID, char>| ();
   let schema = self::schema();
   let mut parser = Context::new(&schema, ID::JsonText, event_handler).unwrap();
   for ch in SAMPLE.chars() {

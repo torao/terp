@@ -99,7 +99,7 @@ fn context_definition_not_found() {
   let schema = Schema::<&str, char>::new("Foo");
 
   let mut events = Vec::new();
-  let handler = |e: Event<_, _>| events.push(e);
+  let handler = |e: &Event<_, _>| events.push(e.clone());
   match Context::new(&schema, "A", handler) {
     Err(Error::UndefinedID(a)) => assert_eq!("A", a),
     Ok(_) => unreachable!(),
@@ -113,7 +113,7 @@ fn context_for_signle_def_single_term() {
   let schema = Schema::new("Foo").define("A", a);
 
   let mut events = Vec::new();
-  let handler = |e: Event<_, _>| events.push(e);
+  let handler = |e: &Event<_, _>| events.push(e.clone());
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('0').unwrap();
   parser.push('1').unwrap();
@@ -122,7 +122,7 @@ fn context_for_signle_def_single_term() {
   Events::new().begin("A").fragments("012").end().assert_eq(&events);
 
   let mut events = Vec::new();
-  let handler = |e: Event<_, _>| events.push(e);
+  let handler = |e: &Event<_, _>| events.push(e.clone());
   let parser = Context::new(&schema, "A", handler).unwrap();
   assert_unmatch(parser.finish(), location(0, 0, 0), "", "[ASCII_DIGIT{3}]", "[EOF]");
 }
@@ -133,7 +133,7 @@ fn context_eof_expected_but_valud_value_arrived() {
   let schema = Schema::new("Foo").define("A", a);
 
   let mut events = Vec::new();
-  let handler = |e: Event<_, _>| events.push(e);
+  let handler = |e: &Event<_, _>| events.push(e.clone());
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('0').unwrap();
   parser.push('1').unwrap();
@@ -149,7 +149,7 @@ fn context_valid_value_expected_but_eof_detected() {
   let schema = Schema::new("Foo").define("A", a);
 
   let mut events = Vec::new();
-  let handler = |e: Event<_, _>| events.push(e);
+  let handler = |e: &Event<_, _>| events.push(e.clone());
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('0').unwrap();
   parser.push('1').unwrap();
@@ -162,7 +162,7 @@ fn context_multiple_match() {
   let schema = Schema::new("Foo").define("A", a);
 
   let mut events = Vec::new();
-  let handler = |e: Event<_, _>| events.push(e);
+  let handler = |e: &Event<_, _>| events.push(e.clone());
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('0').unwrap();
   parser.push('1').unwrap();
@@ -185,7 +185,7 @@ fn context_match_within_repetition_range() {
 
   for digits in ["0", "01", "012"] {
     let mut events = Vec::new();
-    let handler = |e: Event<_, _>| events.push(e);
+    let handler = |e: &Event<_, _>| events.push(e.clone());
     let mut parser = Context::new(&schema, "A", handler).unwrap();
     for ch in digits.chars() {
       parser.push(ch).unwrap();
@@ -196,13 +196,13 @@ fn context_match_within_repetition_range() {
 
   // if less than the repetition range
   let mut events = Vec::new();
-  let handler = |e: Event<_, _>| events.push(e);
+  let handler = |e: &Event<_, _>| events.push(e.clone());
   let parser = Context::new(&schema, "A", handler).unwrap();
   assert_unmatch(parser.finish(), location(0, 0, 0), "", "[ASCII_DIGIT{1,3}]", "[EOF]");
 
   // if the repetition range is exceeded
   let mut events = Vec::new();
-  let handler = |e: Event<_, _>| events.push(e);
+  let handler = |e: &Event<_, _>| events.push(e.clone());
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push('0').unwrap();
   parser.push('1').unwrap();
@@ -216,13 +216,13 @@ fn context_match_following_match_within_repetition_range() {
   let schema = Schema::new("Foo").define("A", a);
 
   let mut events = Vec::new();
-  let handler = |e: Event<_, _>| events.push(e);
+  let handler = |e: &Event<_, _>| events.push(e.clone());
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   assert_unmatch(parser.push('X'), location(0, 0, 0), "", "[ASCII_DIGIT{1,3}]", "['X']...");
 
   for digits in &["0", "01", "012"] {
     let mut events = Vec::new();
-    let handler = |e: Event<_, _>| events.push(e);
+    let handler = |e: &Event<_, _>| events.push(e.clone());
     let mut parser = Context::new(&schema, "A", handler).unwrap();
     for ch in digits.chars() {
       parser.push(ch).unwrap();
@@ -239,7 +239,7 @@ fn context_repetition_for_sequence() {
   let schema = Schema::new("Foo").define("A", a);
 
   let mut events = Vec::new();
-  let handler = |e: Event<_, _>| events.push(e);
+  let handler = |e: &Event<_, _>| events.push(e.clone());
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   for ch in "A0B1234567X8Y9012345".chars() {
     parser.push(ch).unwrap();
@@ -255,7 +255,7 @@ fn context_events_nested() {
   let schema = Schema::new("Foo").define("A", a).define("B", b);
 
   let mut events = Vec::new();
-  let handler = |e: Event<_, _>| events.push(e);
+  let handler = |e: &Event<_, _>| events.push(e.clone());
   let mut parser = Context::new(&schema, "B", handler).unwrap();
   parser.push('E').unwrap();
   parser.push('0').unwrap();
@@ -283,9 +283,9 @@ fn context_with_enum_id() {
   println!("{}", schema);
 
   let mut events = Vec::new();
-  let handler = |e: Event<_, _>| {
+  let handler = |e: &Event<_, _>| {
     println!("  RECEIVED: {:?}", e);
-    events.push(e);
+    events.push(e.clone());
   };
   let mut parser = Context::new(&schema, X::B, handler).unwrap();
   assert_eq!(X::B, *parser.id());
@@ -349,9 +349,9 @@ fn context_seq_keywords() {
   for kwd in &keywords {
     eprintln!("[{}] ---------------------", kwd);
     let mut events = Vec::new();
-    let handler = |e: Event<_, _>| {
+    let handler = |e: &Event<_, _>| {
       eprintln!("> Event[{}] {:?}", e.location, e.kind);
-      events.push(e);
+      events.push(e.clone());
     };
     let mut parser = Context::new(&schema, "A", handler).unwrap();
     parser.push_str(kwd).unwrap();
@@ -359,19 +359,19 @@ fn context_seq_keywords() {
     Events::new().begin("A").fragments(kwd).end().assert_eq(&events);
 
     let mut events = Vec::new();
-    let handler = |e: Event<_, _>| events.push(e);
+    let handler = |e: &Event<_, _>| events.push(e.clone());
     let parser = Context::new(&schema, "A", handler).unwrap();
     let expecteds = keywords.iter().map(|kwd| format!("[{}]", kwd)).collect::<Vec<_>>();
     assert_unmatches(parser.finish(), location(0, 0, 0), "", &expecteds, "[EOF]");
 
     let mut events = Vec::new();
-    let handler = |e: Event<_, _>| events.push(e);
+    let handler = |e: &Event<_, _>| events.push(e.clone());
     let mut parser = Context::new(&schema, "A", handler).unwrap();
     let expecteds = keywords.iter().map(|kwd| format!("[{}]", kwd)).collect::<Vec<_>>();
     assert_unmatches(parser.push('X'), location(0, 0, 0), "", &expecteds, "['X']...");
 
     let mut events = Vec::new();
-    let handler = |e: Event<_, _>| events.push(e);
+    let handler = |e: &Event<_, _>| events.push(e.clone());
     let mut parser = Context::new(&schema, "A", handler).unwrap();
     parser.push_str(kwd).unwrap();
     assert!(matches!(parser.push('X'), Err(Error::<char>::Unmatched { .. }))); // various errors
@@ -391,26 +391,26 @@ fn context_one_of_tokens() {
   let schema = Schema::new("Foo").define("A", a);
   for kwd in &keywords {
     let mut events = Vec::new();
-    let handler = |e: Event<_, _>| events.push(e);
+    let handler = |e: &Event<_, _>| events.push(e.clone());
     let mut parser = Context::new(&schema, "A", handler).unwrap();
     parser.push_str(kwd).unwrap();
     parser.finish().unwrap();
     Events::new().begin("A").fragments(kwd).end().assert_eq(&events);
 
     let mut events = Vec::new();
-    let handler = |e: Event<_, _>| events.push(e);
+    let handler = |e: &Event<_, _>| events.push(e.clone());
     let parser = Context::new(&schema, "A", handler).unwrap();
     let expected = format!("[{}]", keywords.to_vec().join("|"));
     assert_unmatch(parser.finish(), location(0, 0, 0), "", &expected, "[EOF]");
 
     let mut events = Vec::new();
-    let handler = |e: Event<_, _>| events.push(e);
+    let handler = |e: &Event<_, _>| events.push(e.clone());
     let mut parser = Context::new(&schema, "A", handler).unwrap();
     let expected = format!("[{}]", keywords.to_vec().join("|"));
     assert_unmatch(parser.push('X'), location(0, 0, 0), "", &expected, "['X']...");
 
     let mut events = Vec::new();
-    let handler = |e: Event<_, _>| events.push(e);
+    let handler = |e: &Event<_, _>| events.push(e.clone());
     let mut parser = Context::new(&schema, "A", handler).unwrap();
     parser.push_str(kwd).unwrap();
     assert!(matches!(parser.push('X'), Err(Error::<char>::Unmatched { .. }))); // various errors
@@ -424,7 +424,7 @@ fn context_push_seq() {
 
   for splitted_sample in combination_div("012") {
     let mut events = Vec::new();
-    let handler = |e: Event<_, _>| events.push(e);
+    let handler = |e: &Event<_, _>| events.push(e.clone());
     let mut parser = Context::new(&schema, "A", handler).unwrap();
     for fragment in splitted_sample {
       parser.push_str(&fragment).unwrap();
@@ -434,7 +434,7 @@ fn context_push_seq() {
   }
 
   let mut events = Vec::new();
-  let handler = |e: Event<_, _>| events.push(e);
+  let handler = |e: &Event<_, _>| events.push(e.clone());
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push_seq(&[]).unwrap(); // empty sequence
   parser.push_str("012").unwrap();
@@ -446,7 +446,7 @@ fn context_fit_buffer_to_min_size() {
   let a = ascii_digit() * (0..);
   let schema = Schema::new("Foo").define("A", a);
   let mut events = Vec::new();
-  let handler = |e: Event<_, _>| events.push(e);
+  let handler = |e: &Event<_, _>| events.push(e.clone());
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   let mut expected = Events::new().begin("A");
   for i in 0..=1024 {
@@ -464,7 +464,7 @@ fn check_whether_possible_to_proceed() {
   let schema = Schema::new("Foo").define("A", a);
 
   let mut events = Vec::new();
-  let handler = |e: Event<_, _>| events.push(e);
+  let handler = |e: &Event<_, _>| events.push(e.clone());
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push_str("012").unwrap(); // completed
   parser.push_str("").unwrap(); // OK
@@ -472,13 +472,13 @@ fn check_whether_possible_to_proceed() {
   Events::new().begin("A").fragments("012").end().assert_eq(&events);
 
   let mut events = Vec::new();
-  let handler = |e: Event<_, _>| events.push(e);
+  let handler = |e: &Event<_, _>| events.push(e.clone());
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push_str("012").unwrap(); // completed
   assert_unmatch(parser.push_str("3"), location(3, 0, 3), "012", "[EOF]", "['3']...");
 
   let mut events = Vec::new();
-  let handler = |e: Event<_, _>| events.push(e);
+  let handler = |e: &Event<_, _>| events.push(e.clone());
   let mut parser = Context::new(&schema, "A", handler).unwrap();
   parser.push_str("0").unwrap();
   parser.push_str("12").unwrap(); // completed
@@ -498,7 +498,7 @@ fn schema_named_syntax() {
     for rank in "A233456789XJQK".chars() {
       let sample = format!("{}{}", suit, rank);
       let mut events = Vec::new();
-      let handler = |e: Event<_, _>| events.push(e);
+      let handler = |e: &Event<_, _>| events.push(e.clone());
       let mut parser = Context::new(&schema, "CARD", handler).unwrap();
       parser.push_str(&sample).unwrap();
       parser.finish().unwrap();
@@ -525,7 +525,7 @@ fn schema_named_syntax_recursive() {
     let sample = format!("{}terp{}", (0..i).map(|_| '(').collect::<String>(), (0..i).map(|_| ')').collect::<String>());
     println!("sample: {}", sample);
     let mut events = Vec::new();
-    let handler = |e: Event<_, _>| events.push(e);
+    let handler = |e: &Event<_, _>| events.push(e.clone());
     let mut parser = Context::new(&schema, "P", handler).unwrap();
     parser.push_str(&sample).unwrap();
     parser.finish().unwrap();
@@ -622,7 +622,7 @@ fn normalize<ID: Clone + Display + Debug + Eq + Eq + Hash>(events: &[Event<ID, c
     buffer.push(e.clone());
   }
   let mut events = Vec::with_capacity(events.len());
-  buffer.flush_to(buffer.len(), &mut |e| events.push(e));
+  buffer.flush_to(buffer.len(), &mut |e| events.push(e.clone()));
   events
 }
 

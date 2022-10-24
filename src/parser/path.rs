@@ -210,11 +210,11 @@ where
     self.event_buffer.push(e)
   }
 
-  pub fn events_flush_all_to<H: FnMut(Event<ID, Σ>)>(&mut self, handler: &mut H) {
+  pub fn events_flush_all_to<H: FnMut(&Event<ID, Σ>)>(&mut self, handler: &mut H) {
     self.events_flush_forward_to(self.event_buffer.len(), handler)
   }
 
-  pub fn events_flush_forward_to<H: FnMut(Event<ID, Σ>)>(&mut self, n: usize, handler: &mut H) {
+  pub fn events_flush_forward_to<H: FnMut(&Event<ID, Σ>)>(&mut self, n: usize, handler: &mut H) {
     self.event_buffer.flush_to(n, handler)
   }
 
