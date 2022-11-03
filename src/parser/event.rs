@@ -116,10 +116,11 @@ where
     self
   }
 
-  pub fn flush_to<H: FnMut(Event<ID, Σ>)>(&mut self, n: usize, handler: &mut H) {
-    for e in self.events.drain(..n) {
-      (handler)(e);
+  pub fn flush_to<H: FnMut(&Event<ID, Σ>)>(&mut self, n: usize, handler: &mut H) {
+    for i in 0..n {
+      (handler)(&self.events[i]);
     }
+    self.events.drain(..n);
   }
 
   pub fn forward_matching_length(&self, other: &Self) -> usize {

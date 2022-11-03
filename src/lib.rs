@@ -30,7 +30,7 @@
 //!   .define("Hex",       range('0'..='9') | range('a'..='f') | range('A'..='F'));
 //!
 //! let mut events = Vec::new();
-//! let mut parser = Context::new(&schema, "String", |e:Event<&str, char>| events.push(e))
+//! let mut parser = Context::new(&schema, "String", |e: &Event<&str, char>| events.push(e.clone()))
 //!   .unwrap()
 //!   .ignore_events_for(&["Char", "Escape", "Unescaped", "Hex"]);
 //! parser.push_str("\"fo").unwrap();

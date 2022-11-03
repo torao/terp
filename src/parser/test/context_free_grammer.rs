@@ -12,8 +12,8 @@ fn 𝑎ⁿ𝑏ⁿ() {
 
   for n in 1..10 {
     let mut events = Vec::new();
-    let event_handler = |e: Event<_, _>| events.push(e);
-    let mut parser = Context::new(&schema, "A", event_handler).unwrap();
+    let handler = |e: &Event<_, _>| events.push(e.clone());
+    let mut parser = Context::new(&schema, "A", handler).unwrap();
 
     let sample = (0..n).fold("ab".to_string(), |ab, _| format!("a{}b", ab));
     parser.push_str(&sample).unwrap();

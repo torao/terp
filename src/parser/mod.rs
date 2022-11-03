@@ -13,7 +13,7 @@ pub use event::*;
 #[cfg(test)]
 pub mod test;
 
-pub struct Context<'s, ID, Σ: Symbol, H: FnMut(Event<ID, Σ>)>
+pub struct Context<'s, ID, Σ: Symbol, H: FnMut(&Event<ID, Σ>)>
 where
   ID: Clone + Hash + Eq + Ord + Display + Debug + Send + Sync,
 {
@@ -27,7 +27,7 @@ where
   prev_unmatched: Vec<Path<'s, ID, Σ>>,
 }
 
-impl<'s, ID, Σ: 'static + Symbol, H: FnMut(Event<ID, Σ>)> Context<'s, ID, Σ, H>
+impl<'s, ID, Σ: 'static + Symbol, H: FnMut(&Event<ID, Σ>)> Context<'s, ID, Σ, H>
 where
   ID: 's + Clone + Hash + Eq + Ord + Display + Debug + Send + Sync,
 {
@@ -437,7 +437,7 @@ fn create_unmatched_label_actual<Σ: Symbol>(buffer: &[Σ], match_length: usize)
   }
 }
 
-impl<'s, ID, H: FnMut(Event<ID, char>)> Context<'s, ID, char, H>
+impl<'s, ID, H: FnMut(&Event<ID, char>)> Context<'s, ID, char, H>
 where
   ID: 's + Clone + Hash + Eq + Ord + Display + Debug + Send + Sync,
 {

@@ -10,7 +10,7 @@ fn parser_behavior() {
     .define("RANK", one_of_chars("A233456789XJQK"));
 
   let mut events = Vec::new();
-  let handler = |e: Event<_, _>| events.push(e);
+  let handler = |e: &Event<_, _>| events.push(e.clone());
   let mut parser = Context::new(&schema, "CARD", handler).unwrap();
   parser.push_str("♠2").unwrap();
   parser.finish().unwrap();
@@ -29,7 +29,7 @@ fn parser_behavior() {
     events
   );
 
-  let handler = |e: Event<_, _>| println!("{:?}", e.kind);
+  let handler = |e: &Event<_, _>| println!("{:?}", e.kind);
   let mut parser = Context::new(&schema, "CARD", handler).unwrap();
   println!("-- pushing ♠ --");
   parser.push_str("♠").unwrap();
